@@ -1,4 +1,4 @@
-# Mini Spark Scheduler
+# SparkCore Go
 
 An educational distributed batch-processing system written in Go and inspired by Apache Spark's RDD execution model.
 
