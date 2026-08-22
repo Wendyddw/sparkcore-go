@@ -3,4 +3,5 @@
 //
 // The package is intentionally independent of the public API, scheduler, and
 // executor so those layers can share planning types without import cycles.
+// IDs are scoped to one driver process and are not stable across restarts.
 package plan
