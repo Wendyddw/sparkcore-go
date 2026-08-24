@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Wendyddw/sparkcore-go/executor"
 	"github.com/Wendyddw/sparkcore-go/plan"
@@ -12,6 +13,24 @@ import (
 type ActionRunner interface {
 	Collect(context.Context, *plan.RDDGraph, plan.RDDID) ([]executor.Record, error)
 	Count(context.Context, *plan.RDDGraph, plan.RDDID) (int64, error)
+}
+
+// TextFile records a lazy text source in the lineage graph.
+// The path is not opened until an action executes the RDD.
+func (c *Context) TextFile(path string, numPartitions int) (RDD, error) {
+	id, err := c.graph.AddNode(plan.RDDNode{
+		Name: "TextFile",
+		Operator: plan.OperatorSpec{
+			Kind:       plan.OpSource,
+			SourcePath: path,
+		},
+		NumPartitions: numPartitions,
+	})
+	if err != nil {
+		return RDD{}, fmt.Errorf("create TextFile RDD: %w", err)
+	}
+
+	return RDD{id: id, ctx: c}, nil
 }
 
 // Context owns driver-side lineage and execution dependencies.
