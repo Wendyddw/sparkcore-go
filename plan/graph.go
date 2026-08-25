@@ -5,8 +5,16 @@ import "fmt"
 // RDDGraph owns the immutable RDD lineage for one driver process.
 // It is not safe for concurrent use; the driver serializes mutations.
 type RDDGraph struct {
-	nextRDDID RDDID
-	nodes     map[RDDID]RDDNode
+	nextRDDID     RDDID
+	nextShuffleID ShuffleID
+	nodes         map[RDDID]RDDNode
+}
+
+// NewShuffleID returns a unique shuffle dependency ID for this graph.
+func (g *RDDGraph) NewShuffleID() ShuffleID {
+	id := g.nextShuffleID
+	g.nextShuffleID++
+	return id
 }
 
 // NewRDDGraph creates an empty lineage graph.
