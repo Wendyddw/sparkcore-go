@@ -43,6 +43,7 @@ type Stage struct {
 	Kind          StageKind         `json:"kind"`
 	ParentIDs     []plan.StageID    `json:"parent_ids,omitempty"`
 	NumPartitions int               `json:"num_partitions"`
+	Operations    []StageOperation  `json:"operations"`
 	ShuffleWrite  *ShuffleWriteSpec `json:"shuffle_write,omitempty"`
 	FinalAction   *ActionSpec       `json:"final_action,omitempty"`
 }
