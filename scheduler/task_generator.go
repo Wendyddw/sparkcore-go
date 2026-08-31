@@ -25,13 +25,14 @@ func GenerateTasks(stagePlan StagePlan) ([]Task, error) {
 	for _, stage := range stagePlan.Stages {
 		for partition := 0; partition < stage.NumPartitions; partition++ {
 			tasks = append(tasks, Task{
-				ID:           plan.TaskID(len(tasks)),
-				StageID:      stage.ID,
-				StageKind:    stage.Kind,
-				PartitionID:  plan.PartitionID(partition),
-				Operations:   cloneStageOperations(stage.Operations),
-				ShuffleWrite: cloneShuffleWrite(stage.ShuffleWrite),
-				FinalAction:  cloneAction(stage.FinalAction),
+				ID:            plan.TaskID(len(tasks)),
+				StageID:       stage.ID,
+				StageKind:     stage.Kind,
+				PartitionID:   plan.PartitionID(partition),
+				NumPartitions: stage.NumPartitions,
+				Operations:    cloneStageOperations(stage.Operations),
+				ShuffleWrite:  cloneShuffleWrite(stage.ShuffleWrite),
+				FinalAction:   cloneAction(stage.FinalAction),
 			})
 		}
 	}
