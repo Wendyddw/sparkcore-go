@@ -3,7 +3,11 @@ package executor
 import (
 	"strings"
 	"testing"
+
+	"github.com/Wendyddw/sparkcore-go/scheduler"
 )
+
+var _ scheduler.FunctionLookup = (*FunctionRegistry)(nil)
 
 func TestFunctionRegistryRegistersAndLooksUpFunctions(t *testing.T) {
 	t.Parallel()

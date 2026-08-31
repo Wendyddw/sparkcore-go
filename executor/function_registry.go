@@ -71,6 +71,14 @@ func (r *FunctionRegistry) Map(id string) (MapFunc, error) {
 	return fn, nil
 }
 
+// HasMap reports whether id names a registered map function.
+func (r *FunctionRegistry) HasMap(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.maps[id]
+	return ok
+}
+
 // RegisterFilter registers a filter function under id.
 func (r *FunctionRegistry) RegisterFilter(id string, fn FilterFunc) error {
 	if err := validateFunctionRegistration("filter", id, fn == nil); err != nil {
@@ -98,6 +106,14 @@ func (r *FunctionRegistry) Filter(id string) (FilterFunc, error) {
 		return nil, unknownFunctionError("filter", id)
 	}
 	return fn, nil
+}
+
+// HasFilter reports whether id names a registered filter function.
+func (r *FunctionRegistry) HasFilter(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.filters[id]
+	return ok
 }
 
 // RegisterPairMap registers a pair-map function under id.
@@ -129,6 +145,14 @@ func (r *FunctionRegistry) PairMap(id string) (PairMapFunc, error) {
 	return fn, nil
 }
 
+// HasPairMap reports whether id names a registered pair-map function.
+func (r *FunctionRegistry) HasPairMap(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.pairMaps[id]
+	return ok
+}
+
 // RegisterValueMap registers a value-map function under id.
 func (r *FunctionRegistry) RegisterValueMap(id string, fn ValueMapFunc) error {
 	if err := validateFunctionRegistration("value-map", id, fn == nil); err != nil {
@@ -158,6 +182,14 @@ func (r *FunctionRegistry) ValueMap(id string) (ValueMapFunc, error) {
 	return fn, nil
 }
 
+// HasValueMap reports whether id names a registered value-map function.
+func (r *FunctionRegistry) HasValueMap(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.valueMaps[id]
+	return ok
+}
+
 // RegisterReduce registers a reduce function under id.
 func (r *FunctionRegistry) RegisterReduce(id string, fn ReduceFunc) error {
 	if err := validateFunctionRegistration("reduce", id, fn == nil); err != nil {
@@ -185,6 +217,14 @@ func (r *FunctionRegistry) Reduce(id string) (ReduceFunc, error) {
 		return nil, unknownFunctionError("reduce", id)
 	}
 	return fn, nil
+}
+
+// HasReduce reports whether id names a registered reduce function.
+func (r *FunctionRegistry) HasReduce(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.reducers[id]
+	return ok
 }
 
 func validateFunctionRegistration(kind, id string, nilFunction bool) error {

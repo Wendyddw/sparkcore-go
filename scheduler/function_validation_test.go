@@ -1,15 +1,11 @@
 package scheduler
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
-	"github.com/Wendyddw/sparkcore-go/executor"
 	"github.com/Wendyddw/sparkcore-go/plan"
 )
-
-var _ FunctionLookup = (*executor.FunctionRegistry)(nil)
 
 func TestValidateFunctionsResolvesEachOperatorKind(t *testing.T) {
 	tests := []struct {
@@ -35,7 +31,7 @@ func TestValidateFunctionsResolvesEachOperatorKind(t *testing.T) {
 				graph,
 				validationFunctionNode(test.nodeName, test.kind, "function", parent, test.dependency),
 			)
-			lookup := &recordingFunctionLookup{}
+			lookup := &recordingFunctionLookup{exists: true}
 
 			if err := validateFunctions(graph, target, lookup); err != nil {
 				t.Fatalf("validateFunctions() error = %v", err)
@@ -55,13 +51,9 @@ func TestValidateFunctionsReturnsDescriptiveLookupError(t *testing.T) {
 		graph,
 		validationFunctionNode("Map", plan.OpMap, "missing-map", parent, plan.DependencyNarrow),
 	)
-	sentinel := errors.New("map function is not registered")
-	lookup := &recordingFunctionLookup{err: sentinel}
+	lookup := &recordingFunctionLookup{}
 
 	err := validateFunctions(graph, target, lookup)
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("validateFunctions() error = %v, want wrapped lookup error", err)
-	}
 	for _, part := range []string{"RDD 1", "Map", "missing-map", "not registered"} {
 		if !strings.Contains(err.Error(), part) {
 			t.Errorf("validateFunctions() error = %q, want it to contain %q", err, part)
@@ -77,7 +69,7 @@ func TestValidateFunctionsIgnoresUnreachableOperators(t *testing.T) {
 		graph,
 		validationFunctionNode("Map", plan.OpMap, "unrelated-map", target, plan.DependencyNarrow),
 	)
-	lookup := &recordingFunctionLookup{err: errors.New("unexpected lookup")}
+	lookup := &recordingFunctionLookup{}
 
 	if err := validateFunctions(graph, target, lookup); err != nil {
 		t.Fatalf("validateFunctions() error = %v", err)
@@ -98,33 +90,33 @@ func TestValidateFunctionsRejectsNilLookup(t *testing.T) {
 }
 
 type recordingFunctionLookup struct {
-	calls []string
-	err   error
+	calls  []string
+	exists bool
 }
 
-func (l *recordingFunctionLookup) Map(id string) (executor.MapFunc, error) {
+func (l *recordingFunctionLookup) HasMap(id string) bool {
 	l.calls = append(l.calls, "map:"+id)
-	return func(record executor.Record) (executor.Record, error) { return record, nil }, l.err
+	return l.exists
 }
 
-func (l *recordingFunctionLookup) Filter(id string) (executor.FilterFunc, error) {
+func (l *recordingFunctionLookup) HasFilter(id string) bool {
 	l.calls = append(l.calls, "filter:"+id)
-	return func(executor.Record) (bool, error) { return true, nil }, l.err
+	return l.exists
 }
 
-func (l *recordingFunctionLookup) PairMap(id string) (executor.PairMapFunc, error) {
+func (l *recordingFunctionLookup) HasPairMap(id string) bool {
 	l.calls = append(l.calls, "pair-map:"+id)
-	return func(executor.Record) (executor.KeyValue, error) { return executor.KeyValue{}, nil }, l.err
+	return l.exists
 }
 
-func (l *recordingFunctionLookup) ValueMap(id string) (executor.ValueMapFunc, error) {
+func (l *recordingFunctionLookup) HasValueMap(id string) bool {
 	l.calls = append(l.calls, "value-map:"+id)
-	return func(record executor.Record) (executor.Record, error) { return record, nil }, l.err
+	return l.exists
 }
 
-func (l *recordingFunctionLookup) Reduce(id string) (executor.ReduceFunc, error) {
+func (l *recordingFunctionLookup) HasReduce(id string) bool {
 	l.calls = append(l.calls, "reduce:"+id)
-	return func(left, _ executor.Record) (executor.Record, error) { return left, nil }, l.err
+	return l.exists
 }
 
 func validationSource() plan.RDDNode {

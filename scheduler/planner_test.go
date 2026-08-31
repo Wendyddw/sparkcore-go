@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wendyddw/sparkcore-go/executor"
 	"github.com/Wendyddw/sparkcore-go/plan"
 )
 
@@ -14,9 +13,7 @@ func TestPlannerBuildsSingleNarrowResultStage(t *testing.T) {
 	source := addPlannerNode(t, graph, plannerSourceNode(4))
 	mapped := addPlannerNode(t, graph, plannerNarrowNode("Map", plan.OpMap, "map", source, 4))
 	filtered := addPlannerNode(t, graph, plannerNarrowNode("Filter", plan.OpFilter, "filter", mapped, 4))
-	registry := executor.NewFunctionRegistry()
-	mustRegisterMap(t, registry, "map")
-	mustRegisterFilter(t, registry, "filter")
+	registry := &recordingFunctionLookup{exists: true}
 
 	stagePlan, err := NewPlanner(registry).Plan(graph, ActionSpec{Kind: ActionCount, TargetRDD: filtered})
 	if err != nil {
@@ -48,9 +45,7 @@ func TestPlannerBuildsTwoStagesAtShuffleBoundary(t *testing.T) {
 	paired := addPlannerNode(t, graph, plannerNarrowNode("MapToPair", plan.OpMapToPair, "pair", source, 4))
 	partitioner := plan.HashPartitioner(2)
 	reduced := addPlannerNode(t, graph, plannerShuffleNode("ReduceByKey", "sum", paired, partitioner, 9))
-	registry := executor.NewFunctionRegistry()
-	mustRegisterPairMap(t, registry, "pair")
-	mustRegisterReduce(t, registry, "sum")
+	registry := &recordingFunctionLookup{exists: true}
 
 	stagePlan, err := NewPlanner(registry).Plan(graph, ActionSpec{Kind: ActionCollect, TargetRDD: reduced})
 	if err != nil {
@@ -103,7 +98,7 @@ func TestPlannerValidatesFunctionsBeforeCreatingStages(t *testing.T) {
 	source := addPlannerNode(t, graph, plannerSourceNode(1))
 	target := addPlannerNode(t, graph, plannerNarrowNode("Map", plan.OpMap, "missing", source, 1))
 
-	stagePlan, err := NewPlanner(executor.NewFunctionRegistry()).Plan(
+	stagePlan, err := NewPlanner(&recordingFunctionLookup{}).Plan(
 		graph,
 		ActionSpec{Kind: ActionCount, TargetRDD: target},
 	)
@@ -123,9 +118,7 @@ func TestPlannerProducesDeterministicOutput(t *testing.T) {
 	source := addPlannerNode(t, graph, plannerSourceNode(4))
 	paired := addPlannerNode(t, graph, plannerNarrowNode("MapToPair", plan.OpMapToPair, "pair", source, 4))
 	target := addPlannerNode(t, graph, plannerShuffleNode("ReduceByKey", "sum", paired, plan.HashPartitioner(2), 4))
-	registry := executor.NewFunctionRegistry()
-	mustRegisterPairMap(t, registry, "pair")
-	mustRegisterReduce(t, registry, "sum")
+	registry := &recordingFunctionLookup{exists: true}
 	planner := NewPlanner(registry)
 	action := ActionSpec{Kind: ActionCollect, TargetRDD: target}
 
@@ -246,33 +239,5 @@ func assertRDDOperationKinds(t *testing.T, operations []StageOperation, want ...
 		if operations[i].RDD.Operator.Kind != kind {
 			t.Errorf("operation %d kind = %q, want %q", i, operations[i].RDD.Operator.Kind, kind)
 		}
-	}
-}
-
-func mustRegisterMap(t *testing.T, registry *executor.FunctionRegistry, id string) {
-	t.Helper()
-	if err := registry.RegisterMap(id, func(record executor.Record) (executor.Record, error) { return record, nil }); err != nil {
-		t.Fatalf("RegisterMap(%q) error = %v", id, err)
-	}
-}
-
-func mustRegisterFilter(t *testing.T, registry *executor.FunctionRegistry, id string) {
-	t.Helper()
-	if err := registry.RegisterFilter(id, func(executor.Record) (bool, error) { return true, nil }); err != nil {
-		t.Fatalf("RegisterFilter(%q) error = %v", id, err)
-	}
-}
-
-func mustRegisterPairMap(t *testing.T, registry *executor.FunctionRegistry, id string) {
-	t.Helper()
-	if err := registry.RegisterPairMap(id, func(executor.Record) (executor.KeyValue, error) { return executor.KeyValue{}, nil }); err != nil {
-		t.Fatalf("RegisterPairMap(%q) error = %v", id, err)
-	}
-}
-
-func mustRegisterReduce(t *testing.T, registry *executor.FunctionRegistry, id string) {
-	t.Helper()
-	if err := registry.RegisterReduce(id, func(left, _ executor.Record) (executor.Record, error) { return left, nil }); err != nil {
-		t.Fatalf("RegisterReduce(%q) error = %v", id, err)
 	}
 }

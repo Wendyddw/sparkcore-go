@@ -3,17 +3,16 @@ package scheduler
 import (
 	"fmt"
 
-	"github.com/Wendyddw/sparkcore-go/executor"
 	"github.com/Wendyddw/sparkcore-go/plan"
 )
 
 // FunctionLookup resolves the named functions required by a job.
 type FunctionLookup interface {
-	Map(string) (executor.MapFunc, error)
-	Filter(string) (executor.FilterFunc, error)
-	PairMap(string) (executor.PairMapFunc, error)
-	ValueMap(string) (executor.ValueMapFunc, error)
-	Reduce(string) (executor.ReduceFunc, error)
+	HasMap(string) bool
+	HasFilter(string) bool
+	HasPairMap(string) bool
+	HasValueMap(string) bool
+	HasReduce(string) bool
 }
 
 // validateFunctions checks target-reachable functions before stage generation.
@@ -50,24 +49,25 @@ func validateFunctions(graph *plan.RDDGraph, target plan.RDDID, functions Functi
 
 func validateNodeFunction(node plan.RDDNode, functions FunctionLookup) error {
 	id := node.Operator.FunctionID
-	var err error
+	var exists bool
+	var kind string
 
 	switch node.Operator.Kind {
 	case plan.OpSource:
 		return nil
 	case plan.OpMap:
-		_, err = functions.Map(id)
+		kind, exists = "map", functions.HasMap(id)
 	case plan.OpFilter:
-		_, err = functions.Filter(id)
+		kind, exists = "filter", functions.HasFilter(id)
 	case plan.OpMapToPair:
-		_, err = functions.PairMap(id)
+		kind, exists = "pair-map", functions.HasPairMap(id)
 	case plan.OpMapValues:
-		_, err = functions.ValueMap(id)
+		kind, exists = "value-map", functions.HasValueMap(id)
 	case plan.OpReduceByKey:
-		_, err = functions.Reduce(id)
+		kind, exists = "reduce", functions.HasReduce(id)
 	}
-	if err != nil {
-		return fmt.Errorf("function %q: %w", id, err)
+	if !exists {
+		return fmt.Errorf("%s function %q is not registered", kind, id)
 	}
 	return nil
 }
