@@ -28,7 +28,7 @@ type localTaskSucceeded struct {
 	taskID    plan.TaskID
 	stageID   plan.StageID
 	partition plan.PartitionID
-	output    taskOutput
+	output    TaskOutput
 }
 
 func (localTaskSucceeded) isSchedulerEvent() {}
@@ -52,16 +52,15 @@ type jobCanceled struct {
 
 func (jobCanceled) isSchedulerEvent() {}
 
-// taskOutput remains partition-local until every task in its stage succeeds.
+// TaskOutput remains partition-local until every task in its stage succeeds.
 // Records use any to keep scheduler independent of executor implementation types.
-type taskOutput struct {
-	records []any
-	count   int64
+type TaskOutput struct {
+	Records []any
+	Count   int64
 }
 
 // jobCompletion is delivered exactly once to the action caller.
 type jobCompletion struct {
-	records []any
-	count   int64
-	err     error
+	result JobResult
+	err    error
 }
