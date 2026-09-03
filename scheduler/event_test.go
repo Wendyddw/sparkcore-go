@@ -57,8 +57,9 @@ func TestAllEventTypesImplementSchedulerEvent(t *testing.T) {
 		localTaskSucceeded{},
 		localTaskFailed{},
 		jobCanceled{},
+		schedulerStopping{},
 	}
-	if len(events) != 4 {
-		t.Fatalf("event count = %d, want 4", len(events))
+	if len(events) != 5 {
+		t.Fatalf("event count = %d, want 5", len(events))
 	}
 }

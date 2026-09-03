@@ -109,6 +109,51 @@ func TestDAGSchedulerFailureCancelsSiblingTasks(t *testing.T) {
 	runner.waitForCancellations(t, 2)
 }
 
+func TestDAGSchedulerCloseCancelsJobsAndUnblocksCallers(t *testing.T) {
+	graph := plan.NewRDDGraph()
+	target := addPlannerNode(t, graph, plannerSourceNode(3))
+	runner := newControlledTaskRunner()
+	dag := NewDAGScheduler(&recordingFunctionLookup{exists: true}, runner)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := dag.Run(context.Background(), graph, ActionSpec{Kind: ActionCount, TargetRDD: target})
+		errCh <- err
+	}()
+	runner.waitForTasks(t, 3)
+
+	closed := make(chan struct{})
+	go func() {
+		dag.Close()
+		close(closed)
+	}()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, ErrSchedulerClosed) {
+			t.Fatalf("Run() error = %v, want scheduler closed", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close() did not unblock Run()")
+	}
+	runner.waitForCancellations(t, 3)
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close() did not wait for goroutines to exit")
+	}
+}
+
+func TestDAGSchedulerCloseIsIdempotentAndRejectsNewJobs(t *testing.T) {
+	dag := NewDAGScheduler(&recordingFunctionLookup{exists: true}, newControlledTaskRunner())
+	dag.Close()
+	dag.Close()
+
+	_, err := dag.Run(context.Background(), plan.NewRDDGraph(), ActionSpec{Kind: ActionCount})
+	if !errors.Is(err, ErrSchedulerClosed) {
+		t.Fatalf("Run() after Close error = %v, want scheduler closed", err)
+	}
+}
+
 type controlledTaskRunner struct {
 	mu       sync.Mutex
 	controls map[plan.PartitionID]chan controlledTaskResult

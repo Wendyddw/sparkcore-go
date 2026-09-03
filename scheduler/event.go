@@ -52,6 +52,13 @@ type jobCanceled struct {
 
 func (jobCanceled) isSchedulerEvent() {}
 
+// schedulerStopping cancels active jobs before the event loop exits.
+type schedulerStopping struct {
+	done chan<- struct{}
+}
+
+func (schedulerStopping) isSchedulerEvent() {}
+
 // TaskOutput remains partition-local until every task in its stage succeeds.
 // Records use any to keep scheduler independent of executor implementation types.
 type TaskOutput struct {

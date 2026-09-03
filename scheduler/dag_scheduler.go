@@ -2,11 +2,16 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/Wendyddw/sparkcore-go/plan"
 )
+
+// ErrSchedulerClosed indicates that the scheduler is shutting down or stopped.
+var ErrSchedulerClosed = errors.New("DAG scheduler is closed")
 
 // TaskRunner executes one logical partition outside the scheduler event loop.
 type TaskRunner interface {
@@ -43,6 +48,10 @@ type DAGScheduler struct {
 	loop      *eventLoop
 	jobs      map[plan.JobID]*jobState
 	nextJobID atomic.Uint64
+	closing   atomic.Bool
+	closeOnce sync.Once
+	workers   sync.WaitGroup
+	stopping  bool
 }
 
 // NewDAGScheduler creates and starts an in-process DAG scheduler.
@@ -65,6 +74,9 @@ func (s *DAGScheduler) Run(
 	if s == nil || s.loop == nil {
 		return JobResult{}, fmt.Errorf("run action %q for RDD %d: scheduler is not running", action.Kind, action.TargetRDD)
 	}
+	if s.closing.Load() {
+		return JobResult{}, ErrSchedulerClosed
+	}
 	jobID := plan.JobID(s.nextJobID.Add(1) - 1)
 	response := make(chan jobCompletion, 1)
 	if err := s.loop.send(ctx, jobSubmitted{
@@ -84,11 +96,20 @@ func (s *DAGScheduler) Run(
 	return completion.result, nil
 }
 
-// Close stops an idle scheduler. Active-job shutdown is completed separately.
+// Close cancels active jobs, waits for scheduler-owned goroutines, and stops the loop.
 func (s *DAGScheduler) Close() {
-	if s != nil && s.loop != nil {
-		s.loop.close()
+	if s == nil || s.loop == nil {
+		return
 	}
+	s.closeOnce.Do(func() {
+		s.closing.Store(true)
+		stopped := make(chan struct{})
+		if err := s.loop.send(context.Background(), schedulerStopping{done: stopped}); err == nil {
+			<-stopped
+		}
+		s.workers.Wait()
+		s.loop.close()
+	})
 }
 
 func (s *DAGScheduler) handleEvent(event schedulerEvent) {
@@ -107,10 +128,16 @@ func (s *DAGScheduler) handleEvent(event schedulerEvent) {
 		))
 	case jobCanceled:
 		s.failJob(event.jobID, event.err)
+	case schedulerStopping:
+		s.handleStopping(event)
 	}
 }
 
 func (s *DAGScheduler) handleJobSubmitted(event jobSubmitted) {
+	if s.stopping {
+		event.response <- jobCompletion{err: ErrSchedulerClosed}
+		return
+	}
 	if s.runner == nil {
 		event.response <- jobCompletion{err: fmt.Errorf("task runner is nil")}
 		return
@@ -140,13 +167,16 @@ func (s *DAGScheduler) handleJobSubmitted(event jobSubmitted) {
 		response:  event.response,
 		cancel:    cancel,
 	}
+	s.workers.Add(1)
 	go s.watchCancellation(event.jobID, event.ctx, jobCtx)
 	for _, task := range tasks {
+		s.workers.Add(1)
 		go s.executeTask(jobCtx, event.jobID, task)
 	}
 }
 
 func (s *DAGScheduler) executeTask(ctx context.Context, jobID plan.JobID, task Task) {
+	defer s.workers.Done()
 	output, err := s.runner.RunTask(ctx, task)
 	var event schedulerEvent = localTaskSucceeded{
 		jobID:     jobID,
@@ -168,11 +198,20 @@ func (s *DAGScheduler) executeTask(ctx context.Context, jobID plan.JobID, task T
 }
 
 func (s *DAGScheduler) watchCancellation(jobID plan.JobID, callerCtx, jobCtx context.Context) {
+	defer s.workers.Done()
 	select {
 	case <-callerCtx.Done():
 		_ = s.loop.send(context.Background(), jobCanceled{jobID: jobID, err: callerCtx.Err()})
 	case <-jobCtx.Done():
 	}
+}
+
+func (s *DAGScheduler) handleStopping(event schedulerStopping) {
+	s.stopping = true
+	for jobID := range s.jobs {
+		s.failJob(jobID, ErrSchedulerClosed)
+	}
+	event.done <- struct{}{}
 }
 
 func (s *DAGScheduler) handleTaskSucceeded(event localTaskSucceeded) {
