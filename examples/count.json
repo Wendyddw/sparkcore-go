@@ -1,0 +1,17 @@
+{
+  "source": {
+    "path": "examples/input.txt",
+    "num_partitions": 4
+  },
+  "transformations": [
+    {
+      "kind": "map",
+      "function_id": "normalize"
+    },
+    {
+      "kind": "filter",
+      "function_id": "non_empty"
+    }
+  ],
+  "action": "count"
+}

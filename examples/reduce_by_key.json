@@ -1,0 +1,26 @@
+{
+  "source": {
+    "path": "examples/missing-input.txt",
+    "num_partitions": 4
+  },
+  "transformations": [
+    {
+      "kind": "map",
+      "function_id": "normalize"
+    },
+    {
+      "kind": "filter",
+      "function_id": "non_empty"
+    },
+    {
+      "kind": "map_to_pair",
+      "function_id": "word_pair"
+    },
+    {
+      "kind": "reduce_by_key",
+      "function_id": "sum_int",
+      "num_partitions": 2
+    }
+  ],
+  "action": "collect"
+}
