@@ -30,6 +30,15 @@ func TestRDDGraphAssignsMonotonicIDs(t *testing.T) {
 	}
 }
 
+func TestRDDGraphAssignsMonotonicShuffleIDs(t *testing.T) {
+	t.Parallel()
+
+	graph := NewRDDGraph()
+	if first, second := graph.NewShuffleID(), graph.NewShuffleID(); first != 0 || second != 1 {
+		t.Fatalf("assigned shuffle IDs = (%d, %d), want (0, 1)", first, second)
+	}
+}
+
 func TestRDDGraphCopiesNodesAtBoundaries(t *testing.T) {
 	t.Parallel()
 

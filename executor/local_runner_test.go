@@ -26,16 +26,16 @@ func TestLocalRunnerExecutesCompleteNarrowPipelineForCount(t *testing.T) {
 		return record.(int) > 4, nil
 	})
 	sources := memorySourceReader{partitions: map[plan.PartitionID][]Record{
-		0: {1, 2}, 1: {3}, 2: {}, 3: {4, 5},
+		0: {1, 2, 3, 4, 5},
 	}}
-	tasks := narrowTasks(t, scheduler.ActionCount, 4)
+	tasks := narrowTasks(t, scheduler.ActionCount, 1)
 
-	result, err := NewLocalRunner(registry, sources, 2).Run(context.Background(), tasks)
+	result, err := NewLocalRunner(registry, sources, 2).RunTask(context.Background(), tasks[0])
 	if err != nil {
-		t.Fatalf("Run() error = %v", err)
+		t.Fatalf("RunTask() error = %v", err)
 	}
 	if result.Count != 3 {
-		t.Fatalf("Run() count = %d, want 3", result.Count)
+		t.Fatalf("RunTask() count = %d, want 3", result.Count)
 	}
 	if maps.Load() != 5 || filters.Load() != 5 {
 		t.Fatalf("pipeline calls = map:%d filter:%d, want 5 each", maps.Load(), filters.Load())
@@ -56,16 +56,21 @@ func TestLocalRunnerCountsFourTextFilePartitions(t *testing.T) {
 		tasks[i].Operations[0].RDD.Operator.SourcePath = path
 	}
 
-	result, err := NewLocalRunner(registry, TextSourceReader{}, 4).Run(context.Background(), tasks)
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
+	var count int64
+	runner := NewLocalRunner(registry, TextSourceReader{}, 4)
+	for _, task := range tasks {
+		result, err := runner.RunTask(context.Background(), task)
+		if err != nil {
+			t.Fatalf("RunTask() error = %v", err)
+		}
+		count += result.Count
 	}
-	if result.Count != 4 {
-		t.Fatalf("Run() count = %d, want 4", result.Count)
+	if count != 4 {
+		t.Fatalf("combined RunTask() count = %d, want 4", count)
 	}
 }
 
-func TestLocalRunnerCollectMergesInPartitionOrder(t *testing.T) {
+func TestLocalRunnerReturnsPartitionScopedCollectOutput(t *testing.T) {
 	registry := NewFunctionRegistry()
 	mustRegisterRunnerMap(t, registry, "double", func(record Record) (Record, error) { return record, nil })
 	mustRegisterRunnerFilter(t, registry, "over-four", func(Record) (bool, error) { return true, nil })
@@ -73,13 +78,13 @@ func TestLocalRunnerCollectMergesInPartitionOrder(t *testing.T) {
 		0: {"p0-a", "p0-b"}, 1: {"p1"}, 2: {}, 3: {"p3"},
 	}}
 
-	result, err := NewLocalRunner(registry, sources, 4).Run(
-		context.Background(), narrowTasks(t, scheduler.ActionCollect, 4),
+	result, err := NewLocalRunner(registry, sources, 4).RunTask(
+		context.Background(), narrowTasks(t, scheduler.ActionCollect, 4)[0],
 	)
 	if err != nil {
-		t.Fatalf("Run() error = %v", err)
+		t.Fatalf("RunTask() error = %v", err)
 	}
-	want := []Record{"p0-a", "p0-b", "p1", "p3"}
+	want := []any{"p0-a", "p0-b"}
 	if !reflect.DeepEqual(result.Records, want) {
 		t.Fatalf("Run() records = %#v, want %#v", result.Records, want)
 	}
@@ -93,7 +98,7 @@ func TestLocalRunnerCancellationStopsWork(t *testing.T) {
 	sources := blockingSourceReader{started: make(chan struct{})}
 	done := make(chan error, 1)
 	go func() {
-		_, err := NewLocalRunner(registry, sources, 2).Run(ctx, narrowTasks(t, scheduler.ActionCount, 4))
+		_, err := NewLocalRunner(registry, sources, 2).RunTask(ctx, narrowTasks(t, scheduler.ActionCount, 4)[0])
 		done <- err
 	}()
 	<-sources.started
@@ -108,15 +113,15 @@ func TestLocalRunnerCancellationStopsWork(t *testing.T) {
 	}
 }
 
-func TestLocalRunnerErrorsIdentifyStageAndPartition(t *testing.T) {
+func TestLocalRunnerReturnsSourceErrors(t *testing.T) {
 	registry := NewFunctionRegistry()
 	mustRegisterRunnerMap(t, registry, "double", func(record Record) (Record, error) { return record, nil })
 	mustRegisterRunnerFilter(t, registry, "over-four", func(Record) (bool, error) { return true, nil })
 	tasks := narrowTasks(t, scheduler.ActionCount, 1)
 
-	_, err := NewLocalRunner(registry, failingSourceReader{}, 1).Run(context.Background(), tasks)
-	if err == nil || !strings.Contains(err.Error(), "stage 0 partition 0") {
-		t.Fatalf("Run() error = %v, want stage and partition", err)
+	_, err := NewLocalRunner(registry, failingSourceReader{}, 1).RunTask(context.Background(), tasks[0])
+	if err == nil || !strings.Contains(err.Error(), "source failed") {
+		t.Fatalf("RunTask() error = %v, want source failure", err)
 	}
 }
 
