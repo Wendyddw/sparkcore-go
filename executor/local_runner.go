@@ -15,6 +15,11 @@ type LocalRunner struct {
 	permits        chan struct{}
 }
 
+var (
+	_ scheduler.TaskRunner     = (*LocalRunner)(nil)
+	_ scheduler.FunctionLookup = (*FunctionRegistry)(nil)
+)
+
 // NewLocalRunner creates an in-process task runner.
 func NewLocalRunner(registry *FunctionRegistry, sources SourceReader, maxConcurrency int) *LocalRunner {
 	if sources == nil {

@@ -16,7 +16,7 @@ coverage.out
 .DS_Store
 
 # Local Codex/agent working memory
-/WEEK1_IMPLEMENTATION_PLAN.md
+/WEEK*_IMPLEMENTATION_PLAN.md
 /task_plan.md
 /findings.md
 /progress.md
