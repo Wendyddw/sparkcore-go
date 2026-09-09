@@ -81,3 +81,56 @@ func TestTaskCarriesStageExecutionTemplate(t *testing.T) {
 		t.Errorf("shuffle-map final action = %#v, want nil", task.FinalAction)
 	}
 }
+
+func TestTaskAttemptsKeepLogicalTaskIdentityAcrossWorkers(t *testing.T) {
+	task := Task{ID: 9, StageID: 3, PartitionID: 2}
+	first := TaskAttempt{
+		Identity: TaskAttemptIdentity{ID: 20, TaskID: task.ID, StageAttemptID: 4},
+		Task:     task,
+		WorkerID: "worker-a",
+		State:    TaskFailed,
+	}
+	second := TaskAttempt{
+		Identity: TaskAttemptIdentity{ID: 21, TaskID: task.ID, StageAttemptID: 4},
+		Task:     task,
+		WorkerID: "worker-b",
+		State:    TaskRunning,
+	}
+
+	if first.Identity.TaskID != task.ID || second.Identity.TaskID != task.ID {
+		t.Fatalf("attempts do not reference logical task %d: %#v %#v", task.ID, first, second)
+	}
+	if first.Identity.ID == second.Identity.ID {
+		t.Fatalf("physical attempt IDs are equal: %d", first.Identity.ID)
+	}
+	if first.WorkerID == second.WorkerID {
+		t.Fatalf("attempt workers are equal: %q", first.WorkerID)
+	}
+}
+
+func TestTaskAttemptReportsCarrySchedulingIdentity(t *testing.T) {
+	identity := TaskAttemptIdentity{ID: 12, TaskID: 8, StageAttemptID: 3}
+	success := TaskAttemptSuccess{
+		JobID:       5,
+		StageID:     2,
+		Attempt:     identity,
+		PartitionID: 1,
+		WorkerID:    "worker-a",
+		Output:      TaskOutput{Count: 4},
+	}
+	failure := TaskAttemptFailure{
+		JobID:       5,
+		StageID:     2,
+		Attempt:     identity,
+		PartitionID: 1,
+		WorkerID:    "worker-a",
+		Error:       "task failed",
+	}
+
+	if success.Attempt != identity || success.Output.Count != 4 {
+		t.Fatalf("success report = %#v, want attempt %v and count 4", success, identity)
+	}
+	if failure.Attempt != identity || failure.Error != "task failed" {
+		t.Fatalf("failure report = %#v, want attempt %v and task failure", failure, identity)
+	}
+}

@@ -25,3 +25,6 @@ type StageAttemptID uint64
 
 // TaskAttemptID identifies one physical attempt to run a logical task.
 type TaskAttemptID uint64
+
+// WorkerID identifies one independently running task executor.
+type WorkerID string
