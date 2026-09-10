@@ -1,6 +1,9 @@
 package scheduler
 
-import "github.com/Wendyddw/sparkcore-go/plan"
+import (
+	"context"
+	"github.com/Wendyddw/sparkcore-go/plan"
+)
 
 // Task is the stable logical work for one stage partition.
 // Retries create new attempt identities without changing this task.
@@ -59,4 +62,9 @@ type TaskAttemptFailure struct {
 	PartitionID plan.PartitionID    `json:"partition_id"`
 	WorkerID    plan.WorkerID       `json:"worker_id"`
 	Error       string              `json:"error"`
+}
+
+// TaskRunner executes one logical partition outside the scheduler event loop.
+type TaskRunner interface {
+	RunTask(context.Context, Task) (TaskOutput, error)
 }

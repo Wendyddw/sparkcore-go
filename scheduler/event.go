@@ -22,27 +22,24 @@ type jobSubmitted struct {
 
 func (jobSubmitted) isSchedulerEvent() {}
 
-// localTaskSucceeded reports the successful output of one logical partition.
-type localTaskSucceeded struct {
-	jobID     plan.JobID
-	taskID    plan.TaskID
-	stageID   plan.StageID
-	partition plan.PartitionID
-	output    TaskOutput
+// taskSucceeded carries an accepted partition result from a physical scheduler.
+type taskSucceeded struct{ TaskAttemptSuccess }
+
+func (taskSucceeded) isSchedulerEvent() {}
+
+// taskFailed carries an accepted terminal failure from a physical scheduler.
+type taskFailed struct{ TaskAttemptFailure }
+
+func (taskFailed) isSchedulerEvent() {}
+
+// taskSetFinished ensures scheduling errors or incomplete submissions unblock the job.
+type taskSetFinished struct {
+	jobID          plan.JobID
+	stageAttemptID plan.StageAttemptID
+	err            error
 }
 
-func (localTaskSucceeded) isSchedulerEvent() {}
-
-// localTaskFailed reports that one logical partition could not complete.
-type localTaskFailed struct {
-	jobID     plan.JobID
-	taskID    plan.TaskID
-	stageID   plan.StageID
-	partition plan.PartitionID
-	err       error
-}
-
-func (localTaskFailed) isSchedulerEvent() {}
+func (taskSetFinished) isSchedulerEvent() {}
 
 // jobCanceled requests cancellation of an active job.
 type jobCanceled struct {

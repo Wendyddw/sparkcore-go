@@ -6,6 +6,7 @@ import (
 	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wendyddw/sparkcore-go/plan"
 	"github.com/Wendyddw/sparkcore-go/scheduler"
@@ -131,4 +132,48 @@ func (o *recordingTaskSetObserver) reports() ([]scheduler.TaskAttemptSuccess, []
 	defer o.mu.Unlock()
 	return append([]scheduler.TaskAttemptSuccess(nil), o.successes...),
 		append([]scheduler.TaskAttemptFailure(nil), o.failures...)
+}
+
+type cancelingTaskRunner struct{ started chan struct{} }
+
+func (r *cancelingTaskRunner) RunTask(ctx context.Context, _ scheduler.Task) (scheduler.TaskOutput, error) {
+	r.started <- struct{}{}
+	<-ctx.Done()
+	return scheduler.TaskOutput{}, ctx.Err()
+}
+
+func TestLocalTaskSchedulerWaitsForCanceledAttemptsAndReports(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner := &cancelingTaskRunner{started: make(chan struct{}, 2)}
+	observer := &recordingTaskSetObserver{}
+	done := make(chan error, 1)
+	go func() {
+		done <- NewLocalTaskScheduler(runner).ScheduleTaskSet(ctx, scheduler.TaskSet{Tasks: []scheduler.Task{{ID: 0, PartitionID: 0}, {ID: 1, PartitionID: 1}}}, observer)
+	}()
+	for range 2 {
+		select {
+		case <-runner.started:
+		case <-time.After(time.Second):
+			t.Fatal("attempt did not start")
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled scheduling did not exit")
+	}
+	successes, failures := observer.reports()
+	if len(successes) != 0 || len(failures) != 2 {
+		t.Fatalf("reports = %d successes, %d failures", len(successes), len(failures))
+	}
+	for _, failure := range failures {
+		if failure.Error != context.Canceled.Error() {
+			t.Fatalf("failure = %#v", failure)
+		}
+	}
 }

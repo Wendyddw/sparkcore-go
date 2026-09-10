@@ -15,15 +15,19 @@ type TaskSet struct {
 }
 
 // TaskSetObserver receives terminal attempt reports. Implementations must be
-// safe for concurrent calls from physical task schedulers.
+// safe for concurrent calls from physical task schedulers. The scheduler must
+// filter obsolete attempts before delivering reports.
 type TaskSetObserver interface {
 	TaskSucceeded(TaskAttemptSuccess)
 	TaskFailed(TaskAttemptFailure)
 }
 
 // TaskSetScheduler schedules physical attempts for one stage's logical tasks.
-// ScheduleTaskSet blocks until its scheduling work exits or ctx is canceled;
-// individual attempt outcomes are delivered through observer.
+// ScheduleTaskSet delivers individual attempt outcomes through observer and
+// returns after all scheduling work and callbacks have exited. Implementations
+// must honor ctx cancellation and support concurrent task-set submissions.
+// A nil return requires every task to have a terminal report; a non-nil error
+// terminates the task set even if some tasks have not reported.
 type TaskSetScheduler interface {
 	ScheduleTaskSet(context.Context, TaskSet, TaskSetObserver) error
 }

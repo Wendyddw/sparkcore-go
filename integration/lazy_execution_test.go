@@ -28,7 +28,7 @@ func TestPublicAPINarrowPipelineIsLazyUntilCount(t *testing.T) {
 		3: {" gamma", "delta "},
 	}}
 	localRunner := executor.NewLocalRunner(registry, source, 2)
-	dagScheduler := scheduler.NewDAGScheduler(registry, localRunner)
+	dagScheduler := scheduler.NewDAGScheduler(registry, executor.NewLocalTaskScheduler(localRunner))
 	t.Cleanup(dagScheduler.Close)
 	ctx := api.NewContext(registry, executor.NewSchedulerActionRunner(dagScheduler))
 

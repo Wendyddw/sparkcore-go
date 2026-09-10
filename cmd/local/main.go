@@ -48,7 +48,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		return err
 	}
 	localRunner := executor.NewLocalRunner(registry, nil, spec.Source.NumPartitions)
-	dagScheduler := scheduler.NewDAGScheduler(registry, localRunner)
+	dagScheduler := scheduler.NewDAGScheduler(registry, executor.NewLocalTaskScheduler(localRunner))
 	defer dagScheduler.Close()
 	actionRunner := executor.NewSchedulerActionRunner(dagScheduler)
 	apiContext := api.NewContext(registry, actionRunner)

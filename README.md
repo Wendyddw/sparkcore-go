@@ -36,7 +36,10 @@ validation -> stage planning -> task generation
 DAG scheduler event loop
         |
         v
-bounded local task execution -> partition results -> action result
+LocalTaskScheduler -> bounded LocalRunner.RunTask
+        |
+        v
+partition reports -> DAG scheduler -> action result
 ```
 
 Transformations such as `Map` and `Filter` are lazy: they append serializable metadata to the lineage graph and do not open the source path or run registered functions. `ExplainLineage` and stage planning are also metadata-only operations.
@@ -48,13 +51,13 @@ Transformations such as `Map` and `Filter` are lazy: they append serializable me
 - `api` provides the driver-facing `Context` and lazy `RDD` operations.
 - `plan` owns serializable RDD nodes, dependencies, IDs, validation, and lineage explanation.
 - `scheduler` converts lineage into stages and tasks, then coordinates jobs through a single state-owning event loop.
-- `executor` contains records, the named-function registry, iterator pipelines, text partition readers, and the bounded local task runner.
+- `executor` contains records, the named-function registry, iterator pipelines, text partition readers, the local task-set scheduling adapter, and the bounded local task runner.
 - `jobspec` decodes declarative JSON jobs and builds their lazy RDD lineage.
 - `cmd/local` runs supported jobs; `cmd/explain` prints lineage and stage plans without executing them.
 - `internal/examplefuncs` registers the functions referenced by the included examples.
 - `integration` verifies the public API through planning, scheduling, and execution.
 
-The package dependency direction keeps `plan` independent of the API, scheduler, and executor. The scheduler depends on small function-lookup and task-runner interfaces, while the executor implements those runtime boundaries.
+The package dependency direction keeps `plan` independent of the API, scheduler, and executor. The DAG scheduler depends on small function-lookup and task-set scheduler interfaces, while the executor implements those local runtime boundaries. `LocalTaskScheduler` assigns an attempt ID to each task and calls `LocalRunner.RunTask`; the DAG event loop owns stage completion and Count/Collect merging. Remote worker placement will use the same task-set interface in Week 2.
 
 ## Dependencies and stages
 

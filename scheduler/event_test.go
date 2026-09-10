@@ -22,27 +22,13 @@ func TestSchedulerEventsCarryJobAndTaskIdentity(t *testing.T) {
 		t.Fatalf("job submission = %#v, want job 3 targeting RDD 7", submission)
 	}
 
-	success := localTaskSucceeded{
-		jobID:     3,
-		taskID:    11,
-		stageID:   2,
-		partition: 4,
-		output:    TaskOutput{Count: 9},
-	}
-	if success.jobID != 3 || success.taskID != 11 || success.stageID != 2 || success.partition != 4 {
+	success := taskSucceeded{TaskAttemptSuccess{JobID: 3, StageID: 2, Attempt: TaskAttemptIdentity{ID: 5, TaskID: 11, StageAttemptID: 1}, PartitionID: 4, Output: TaskOutput{Count: 9}}}
+	if success.JobID != 3 || success.Attempt.TaskID != 11 || success.StageID != 2 || success.PartitionID != 4 {
 		t.Fatalf("task success identity = %#v", success)
 	}
-
-	sentinel := errors.New("task failed")
-	failure := localTaskFailed{
-		jobID:     3,
-		taskID:    11,
-		stageID:   2,
-		partition: 4,
-		err:       sentinel,
-	}
-	if !errors.Is(failure.err, sentinel) {
-		t.Fatalf("task failure error = %v, want sentinel", failure.err)
+	failure := taskFailed{TaskAttemptFailure{JobID: 3, StageID: 2, Attempt: success.Attempt, PartitionID: 4, Error: "task failed"}}
+	if failure.Error != "task failed" || failure.Attempt != success.Attempt {
+		t.Fatalf("task failure = %#v", failure)
 	}
 
 	cancellation := jobCanceled{jobID: 3, err: context.Canceled}
@@ -54,12 +40,13 @@ func TestSchedulerEventsCarryJobAndTaskIdentity(t *testing.T) {
 func TestAllEventTypesImplementSchedulerEvent(t *testing.T) {
 	events := []schedulerEvent{
 		jobSubmitted{},
-		localTaskSucceeded{},
-		localTaskFailed{},
+		taskSucceeded{},
+		taskFailed{},
+		taskSetFinished{},
 		jobCanceled{},
 		schedulerStopping{},
 	}
-	if len(events) != 5 {
-		t.Fatalf("event count = %d, want 5", len(events))
+	if len(events) != 6 {
+		t.Fatalf("event count = %d, want 6", len(events))
 	}
 }
