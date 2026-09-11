@@ -57,7 +57,15 @@ Transformations such as `Map` and `Filter` are lazy: they append serializable me
 - `internal/examplefuncs` registers the functions referenced by the included examples.
 - `integration` verifies the public API through planning, scheduling, and execution.
 
-The package dependency direction keeps `plan` independent of the API, scheduler, and executor. The DAG scheduler depends on small function-lookup and task-set scheduler interfaces, while the executor implements those local runtime boundaries. `LocalTaskScheduler` assigns an attempt ID to each task and calls `LocalRunner.RunTask`; the DAG event loop owns stage completion and Count/Collect merging. Remote worker placement will use the same task-set interface in Week 2.
+The package dependency direction keeps `plan` independent of the API, scheduler, and executor. The DAG scheduler depends on small function-lookup and task-set scheduler interfaces, while the executor implements those local runtime boundaries. `LocalTaskScheduler` assigns an attempt ID to each task and calls `LocalRunner.RunTask`; the DAG event loop owns stage completion and Count/Collect merging. `FIFOTaskScheduler` now implements the same interface for placement through in-process worker registration, resource offers, and terminal reports. HTTP transport and worker processes are the next Week 2 steps.
+
+## FIFO task placement
+
+`FIFOTaskScheduler` assigns the oldest task set's pending partitions in ascending order. `RegisterWorker` records a stable worker ID and positive slot capacity; `OfferResources` records free slots and running attempt IDs and returns assignments with unique attempt IDs. `ReportSuccess` and `ReportFailure` accept a terminal result once and release its reservation.
+
+Assignments in transit remain reserved even when a heartbeat does not list them. Failure or cancellation stops further assignment for the task set, but sibling reservations remain until workers report that those attempts have ended. Duplicate and obsolete results cannot overwrite accepted output. Observer callbacks run outside the placement lock, and `Close` waits for submissions and callbacks to exit.
+
+The registry retains heartbeat timestamps for observation only. Worker expiry and retries are deferred; task-set and attempt history are retained for the scheduler instance's lifetime to recognize duplicate reports. The local command continues to use `LocalTaskScheduler`.
 
 ## Dependencies and stages
 
@@ -104,7 +112,7 @@ go vet ./...
 - Records use JSON-compatible values, and keys are strings.
 - Source paths refer to a shared filesystem. Local execution reads them directly, and future workers are assumed to see the same paths.
 - Only narrow pipelines execute in Week 1. Shuffle storage, shuffle-map execution, reduce fetches, and barriers are not implemented yet.
-- Jobs run in one process. There is no coordinator API, remote worker, wire protocol, placement, heartbeat, or retry handling yet.
+- Jobs still run in one process. FIFO placement and heartbeat resource accounting are tested in process; there is no coordinator HTTP API, remote worker runtime, wire protocol, heartbeat expiry, or retry handling yet.
 - The project excludes SQL/Catalyst, joins, caching, streaming, speculative execution, dynamic allocation, advanced locality, disk spilling, production security, and a production UI.
 
 Week 2 introduces coordinator and worker boundaries, transport-friendly requests, worker registration/heartbeats, and retry-oriented task attempts while preserving the Week 1 planning model. Week 3 adds the shared shuffle store and executable one-shuffle `ReduceByKey` path.
