@@ -14,6 +14,13 @@ import (
 // ErrTaskSchedulerClosed indicates that no more placement or reports are accepted.
 var ErrTaskSchedulerClosed = errors.New("FIFO task scheduler is closed")
 
+// Report errors distinguish unknown attempts, identity conflicts and invalid values.
+var (
+	ErrUnknownAttempt    = errors.New("unknown attempt")
+	ErrMismatchedReport  = errors.New("mismatched task report")
+	ErrInvalidTaskReport = errors.New("invalid task report")
+)
+
 // TaskAssignment carries one physical assignment with its enclosing job identity.
 type TaskAssignment struct {
 	JobID   plan.JobID
@@ -279,7 +286,7 @@ func (s *FIFOTaskScheduler) ReportFailure(report TaskAttemptFailure) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if report.Error == "" {
-		return fmt.Errorf("task failure message is empty")
+		return fmt.Errorf("%w: task failure message is empty", ErrInvalidTaskReport)
 	}
 	attempt, err := s.validateReport(report.JobID, report.StageID, report.Attempt, report.PartitionID, report.WorkerID)
 	if err != nil || attempt == nil {
@@ -304,13 +311,16 @@ func (s *FIFOTaskScheduler) validateReport(job plan.JobID, stage plan.StageID, i
 	if s.closed {
 		return nil, ErrTaskSchedulerClosed
 	}
+	if s.registry.workers[worker] == nil {
+		return nil, fmt.Errorf("%w %q", ErrUnknownWorker, worker)
+	}
 	attempt := s.attempts[identity.ID]
 	if attempt == nil {
-		return nil, fmt.Errorf("unknown attempt %d", identity.ID)
+		return nil, fmt.Errorf("%w %d", ErrUnknownAttempt, identity.ID)
 	}
 	a := attempt.assignment
 	if a.JobID != job || a.StageID != stage || a.Attempt.Identity != identity || a.Attempt.Task.PartitionID != partition || a.Attempt.WorkerID != worker {
-		return nil, fmt.Errorf("mismatched report for attempt %d", identity.ID)
+		return nil, fmt.Errorf("%w for attempt %d", ErrMismatchedReport, identity.ID)
 	}
 	if attempt.terminal || attempt.task.active != identity.ID {
 		return nil, nil

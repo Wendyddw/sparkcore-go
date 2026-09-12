@@ -54,7 +54,7 @@ Transformations such as `Map` and `Filter` are lazy: they append serializable me
 - `executor` contains records, the named-function registry, iterator pipelines, text partition readers, the local task-set scheduling adapter, and the bounded local task runner.
 - `jobspec` decodes declarative JSON jobs and builds their lazy RDD lineage.
 - `protocol` defines the `/v1` HTTP/JSON messages, bounded strict decoding, and message validation.
-- `coordinator` exposes worker registration and heartbeat assignments through an injectable HTTP server.
+- `coordinator` exposes worker registration, heartbeat assignments, and terminal task reports through an injectable HTTP server.
 - `cmd/local` runs supported jobs; `cmd/explain` prints lineage and stage plans without executing them.
 - `internal/examplefuncs` registers the functions referenced by the included examples.
 - `integration` verifies the public API through planning, scheduling, and execution.
@@ -79,14 +79,18 @@ Heartbeat decoding validates the reported fields; handlers additionally call `Va
 
 `coordinator.NewServer(taskScheduler, config)` returns a standard `*http.Server` with an injected scheduling dependency. The caller starts it with `Serve` or `ListenAndServe` and drains active requests with `Shutdown(ctx)`. Scheduler shutdown remains the caller's responsibility.
 
-The first HTTP batch supports:
+The worker HTTP API supports:
 
 - `POST /v1/workers/register`: register a worker and its capacity. Repeating the same registration returns `200`; changing its capacity returns `409` without changing reservations. Optional `base_url` is validated but unused by heartbeat polling.
 - `POST /v1/workers/heartbeat`: validate reported capacity and running attempts, then return FIFO assignments up to available slots. No work returns `{"assignments":[]}`.
+- `POST /v1/tasks/success`: deliver partition output to the scheduler, which validates the assignment, releases its reservation once, and queues an observer callback.
+- `POST /v1/tasks/failure`: report a terminal error. The scheduler fails the task set without retry and keeps sibling reservations until those attempts report completion.
 
-Responses use `application/json`. Errors carry the protocol's stable code: invalid input is `400`, unknown workers/endpoints `404`, unsupported methods `405` with `Allow: POST`, registration conflicts `409`, oversized requests `413`, closed scheduling `503`, and unexpected failures `500`.
+Successful report handling returns `200` with `{"acknowledged":true}`, including duplicate and obsolete reports. Acknowledgment confirms safe handling, not a state change. Late reports after task-set failure or cancellation release outstanding reservations without completion callbacks. Count stays `int64`; Collect records remain `json.RawMessage` elements in scheduler output to preserve numeric precision.
 
-Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-second reads/writes, and 60-second idle connections. `Config` can override these values. Tests use `httptest` and the real FIFO scheduler to verify registration, assignment metadata, concurrent offers, reservations, and draining shutdown. Task report endpoints are the next review batch; job submission, worker runtime, and distributed commands follow in later sessions.
+Responses use `application/json`. Errors carry the protocol's stable code: invalid input is `400`, unknown workers/attempts/endpoints `404`, unsupported methods `405` with `Allow: POST`, registration or report-identity conflicts `409`, oversized requests `413`, closed scheduling `503`, and unexpected failures `500`.
+
+Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-second reads/writes, and 60-second idle connections. `Config` can override these values. Tests use `httptest` and the real FIFO scheduler to verify registration, assignment metadata, report callbacks, duplicate/late reports, concurrent offers/reports, reservations, and draining shutdown. Job submission, worker runtime, and distributed commands follow in later sessions.
 
 ## Dependencies and stages
 
@@ -133,7 +137,7 @@ go vet ./...
 - Records use JSON-compatible values, and keys are strings.
 - Source paths refer to a shared filesystem. Local execution reads them directly, and future workers are assumed to see the same paths.
 - Only narrow pipelines execute in Week 1. Shuffle storage, shuffle-map execution, reduce fetches, and barriers are not implemented yet.
-- Jobs still run in one process. Coordinator registration and heartbeat endpoints are implemented; remote result reporting, job submission, worker runtime, and distributed commands remain pending. Heartbeat expiry and retry handling are deferred to Week 3.
+- Jobs still run in one process. Coordinator registration, heartbeat, and task report endpoints are implemented; job submission, worker runtime, and distributed commands remain pending. Heartbeat expiry and retry handling are deferred to Week 3.
 - The project excludes SQL/Catalyst, joins, caching, streaming, speculative execution, dynamic allocation, advanced locality, disk spilling, production security, and a production UI.
 
 Week 2 introduces coordinator and worker boundaries, transport-friendly requests, worker registration/heartbeats, and retry-oriented task attempts while preserving the Week 1 planning model. Week 3 adds the shared shuffle store and executable one-shuffle `ReduceByKey` path.

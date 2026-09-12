@@ -281,17 +281,24 @@ func TestFIFORejectsInvalidWorkersOffersAndReports(t *testing.T) {
 		func(r *TaskAttemptSuccess) { r.JobID++ }, func(r *TaskAttemptSuccess) { r.StageID++ },
 		func(r *TaskAttemptSuccess) { r.Attempt.ID = 999 }, func(r *TaskAttemptSuccess) { r.Attempt.StageAttemptID++ },
 		func(r *TaskAttemptSuccess) { r.Attempt.TaskID++ }, func(r *TaskAttemptSuccess) { r.PartitionID++ }, func(r *TaskAttemptSuccess) { r.WorkerID = "b" },
+		func(r *TaskAttemptSuccess) { r.WorkerID = "missing" },
 	} {
 		r := fifoSuccess(a, 100)
 		mutate(&r)
-		if err := s.ReportSuccess(r); err == nil {
-			t.Fatalf("invalid report accepted: %#v", r)
+		want := ErrMismatchedReport
+		if r.Attempt.ID == 999 {
+			want = ErrUnknownAttempt
+		} else if r.WorkerID == "missing" {
+			want = ErrUnknownWorker
+		}
+		if err := s.ReportSuccess(r); !errors.Is(err, want) {
+			t.Fatalf("invalid report %#v: error = %v, want %v", r, err, want)
 		}
 	}
 	invalidFailure := failureFor(a)
 	invalidFailure.Error = ""
-	if err := s.ReportFailure(invalidFailure); err == nil {
-		t.Fatal("empty failure accepted")
+	if err := s.ReportFailure(invalidFailure); !errors.Is(err, ErrInvalidTaskReport) {
+		t.Fatalf("empty failure error = %v", err)
 	}
 	assertReserved(t, s, "a", 2)
 	for _, a := range assignments {

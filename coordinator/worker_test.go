@@ -36,8 +36,7 @@ type ignoreReports struct{}
 func (ignoreReports) TaskSucceeded(scheduler.TaskAttemptSuccess) {}
 func (ignoreReports) TaskFailed(scheduler.TaskAttemptFailure)    {}
 
-func submitTasks(t *testing.T, tasks *scheduler.FIFOTaskScheduler, partitions int) scheduler.TaskSet {
-	t.Helper()
+func httpTaskSet(partitions int) scheduler.TaskSet {
 	set := scheduler.TaskSet{JobID: 11, StageID: 7, StageAttemptID: 9}
 	for partition := partitions - 1; partition >= 0; partition-- {
 		set.Tasks = append(set.Tasks, scheduler.Task{
@@ -51,6 +50,12 @@ func submitTasks(t *testing.T, tasks *scheduler.FIFOTaskScheduler, partitions in
 			FinalAction: &scheduler.ActionSpec{Kind: scheduler.ActionCount, TargetRDD: 2},
 		})
 	}
+	return set
+}
+
+func submitTasks(t *testing.T, tasks *scheduler.FIFOTaskScheduler, partitions int) scheduler.TaskSet {
+	t.Helper()
+	set := httpTaskSet(partitions)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- tasks.ScheduleTaskSet(ctx, set, ignoreReports{}) }()

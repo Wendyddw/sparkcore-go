@@ -18,6 +18,8 @@ type TaskScheduler interface {
 	RegisterWorker(plan.WorkerID, int) error
 	Worker(plan.WorkerID) (scheduler.WorkerSnapshot, error)
 	OfferResources(plan.WorkerID, int, []plan.TaskAttemptID) ([]scheduler.TaskAssignment, error)
+	ReportSuccess(scheduler.TaskAttemptSuccess) error
+	ReportFailure(scheduler.TaskAttemptFailure) error
 }
 
 var _ TaskScheduler = (*scheduler.FIFOTaskScheduler)(nil)
@@ -85,6 +87,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		serve = h.registerWorker
 	case protocol.HeartbeatPath:
 		serve = h.heartbeat
+	case protocol.TaskSuccessPath:
+		serve = h.taskSuccess
+	case protocol.TaskFailurePath:
+		serve = h.taskFailure
 	default:
 		writeError(w, http.StatusNotFound, protocol.CodeNotFound, "unknown endpoint")
 		return
@@ -112,11 +118,11 @@ func decodeRequest[T protocol.Message](w http.ResponseWriter, r *http.Request, m
 
 func writeSchedulerError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, scheduler.ErrUnknownWorker):
+	case errors.Is(err, scheduler.ErrUnknownWorker), errors.Is(err, scheduler.ErrUnknownAttempt):
 		writeError(w, http.StatusNotFound, protocol.CodeNotFound, err.Error())
-	case errors.Is(err, scheduler.ErrWorkerConflict):
+	case errors.Is(err, scheduler.ErrWorkerConflict), errors.Is(err, scheduler.ErrMismatchedReport):
 		writeError(w, http.StatusConflict, protocol.CodeConflict, err.Error())
-	case errors.Is(err, scheduler.ErrInvalidWorker), errors.Is(err, scheduler.ErrInvalidResourceOffer):
+	case errors.Is(err, scheduler.ErrInvalidWorker), errors.Is(err, scheduler.ErrInvalidResourceOffer), errors.Is(err, scheduler.ErrInvalidTaskReport):
 		writeError(w, http.StatusBadRequest, protocol.CodeInvalidRequest, err.Error())
 	case errors.Is(err, scheduler.ErrTaskSchedulerClosed):
 		writeError(w, http.StatusServiceUnavailable, protocol.CodeUnavailable, err.Error())
