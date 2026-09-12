@@ -50,7 +50,7 @@ func TestResultRecordsPreserveJSONValuesAndIntegerPrecision(t *testing.T) {
 		json.RawMessage(`{"key":"total","value":9223372036854775807}`), json.RawMessage(`[1,"nested",{"enabled":false}]`),
 	}
 	const count int64 = 9223372036854775807
-	task := protocol.TaskSuccessRequest{WorkerID: "worker-a", Output: protocol.TaskOutput{Records: records, Count: count}}
+	task := protocol.TaskSuccessRequest{WorkerID: "worker-a", Output: protocol.TaskOutput{Records: records}}
 	taskJSON, err := json.Marshal(task)
 	if err != nil {
 		t.Fatal(err)

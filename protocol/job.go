@@ -10,7 +10,8 @@ import (
 const SubmitJobPath = "/v1/jobs"
 
 // SubmitJobRequest reuses the existing job format for POST /v1/jobs without
-// another envelope or schema. Bounded strict HTTP decoding is added separately.
+// another envelope or schema. DecodeAndValidate applies bounded strict envelope checks
+// and the existing jobspec.Spec validation.
 type SubmitJobRequest = jobspec.Spec
 
 // JobResultResponse is the completed result of a blocking job submission.

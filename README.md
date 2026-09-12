@@ -53,6 +53,7 @@ Transformations such as `Map` and `Filter` are lazy: they append serializable me
 - `scheduler` converts lineage into stages and tasks, then coordinates jobs through a single state-owning event loop.
 - `executor` contains records, the named-function registry, iterator pipelines, text partition readers, the local task-set scheduling adapter, and the bounded local task runner.
 - `jobspec` decodes declarative JSON jobs and builds their lazy RDD lineage.
+- `protocol` defines the `/v1` HTTP/JSON messages, bounded strict decoding, and message validation.
 - `cmd/local` runs supported jobs; `cmd/explain` prints lineage and stage plans without executing them.
 - `internal/examplefuncs` registers the functions referenced by the included examples.
 - `integration` verifies the public API through planning, scheduling, and execution.
@@ -66,6 +67,12 @@ The package dependency direction keeps `plan` independent of the API, scheduler,
 Assignments in transit remain reserved even when a heartbeat does not list them. Failure or cancellation stops further assignment for the task set, but sibling reservations remain until workers report that those attempts have ended. Duplicate and obsolete results cannot overwrite accepted output. Observer callbacks run outside the placement lock, and `Close` waits for submissions and callbacks to exit.
 
 The registry retains heartbeat timestamps for observation only. Worker expiry and retries are deferred; task-set and attempt history are retained for the scheduler instance's lifetime to recognize duplicate reports. The local command continues to use `LocalTaskScheduler`.
+
+## Protocol contracts
+
+The `/v1` messages cover worker registration, heartbeat assignments, terminal task reports, job submission/results, and structured errors. `protocol.DecodeAndValidate[T](reader, maxBytes)` enforces a whole-body byte limit, exactly one object, known and unique field names, required fields, and semantic validation. Explicit zero IDs remain valid; missing or null numeric fields are rejected. Fields tagged `omitempty` may be absent. Result records remain raw JSON values to preserve their structure and integer precision.
+
+Heartbeat decoding validates the reported fields; handlers additionally call `ValidateCapacity(totalSlots)` with registered capacity. Worker lookup, attempt ownership, reservations, and duplicate result acceptance stay in the scheduler. HTTP handlers must also set I/O deadlines; the decoder bounds bytes but does not own the connection. HTTP service and worker runtime implementation are still pending.
 
 ## Dependencies and stages
 
@@ -112,7 +119,7 @@ go vet ./...
 - Records use JSON-compatible values, and keys are strings.
 - Source paths refer to a shared filesystem. Local execution reads them directly, and future workers are assumed to see the same paths.
 - Only narrow pipelines execute in Week 1. Shuffle storage, shuffle-map execution, reduce fetches, and barriers are not implemented yet.
-- Jobs still run in one process. FIFO placement and heartbeat resource accounting are tested in process; there is no coordinator HTTP API, remote worker runtime, wire protocol, heartbeat expiry, or retry handling yet.
+- Jobs still run in one process. FIFO placement and heartbeat resource accounting are tested in process; the wire contracts are defined, but there is no coordinator HTTP service, remote worker runtime, heartbeat expiry, or retry handling yet.
 - The project excludes SQL/Catalyst, joins, caching, streaming, speculative execution, dynamic allocation, advanced locality, disk spilling, production security, and a production UI.
 
 Week 2 introduces coordinator and worker boundaries, transport-friendly requests, worker registration/heartbeats, and retry-oriented task attempts while preserving the Week 1 planning model. Week 3 adds the shared shuffle store and executable one-shuffle `ReduceByKey` path.

@@ -1,7 +1,8 @@
 // Package protocol defines JSON messages for the coordinator's /v1 HTTP API.
 // Messages contain transport data only; handlers adapt them to scheduler calls.
 // Numeric IDs are zero-based and must be decoded into their typed fields to
-// preserve uint64 precision. Validation and strict decoding are added separately.
+// preserve uint64 precision. DecodeAndValidate enforces bounded, strict envelopes and
+// semantic validation before handlers call the scheduling layer.
 package protocol
 
 import (
