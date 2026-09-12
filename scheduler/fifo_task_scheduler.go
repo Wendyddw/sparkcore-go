@@ -192,16 +192,16 @@ func (s *FIFOTaskScheduler) OfferResources(id plan.WorkerID, free int, running [
 	}
 	worker := s.registry.workers[id]
 	if worker == nil {
-		return nil, fmt.Errorf("unknown worker %q", id)
+		return nil, fmt.Errorf("%w %q", ErrUnknownWorker, id)
 	}
 	if free < 0 || free > worker.TotalSlots || len(running) > worker.TotalSlots-free {
-		return nil, fmt.Errorf("invalid capacity offer for worker %q", id)
+		return nil, fmt.Errorf("%w: invalid capacity for worker %q", ErrInvalidResourceOffer, id)
 	}
 	seen := make(map[plan.TaskAttemptID]bool, len(running))
 	for _, attemptID := range running {
 		attempt := s.attempts[attemptID]
 		if seen[attemptID] || attempt == nil || attempt.assignment.Attempt.WorkerID != id {
-			return nil, fmt.Errorf("invalid running attempt %d for worker %q", attemptID, id)
+			return nil, fmt.Errorf("%w: invalid running attempt %d for worker %q", ErrInvalidResourceOffer, attemptID, id)
 		}
 		seen[attemptID] = true
 	}

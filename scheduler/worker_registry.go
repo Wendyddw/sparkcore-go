@@ -1,11 +1,20 @@
 package scheduler
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"time"
 
 	"github.com/Wendyddw/sparkcore-go/plan"
+)
+
+// Worker errors let callers classify rejected operations without parsing text.
+var (
+	ErrUnknownWorker        = errors.New("unknown worker")
+	ErrWorkerConflict       = errors.New("worker registration conflict")
+	ErrInvalidWorker        = errors.New("invalid worker registration")
+	ErrInvalidResourceOffer = errors.New("invalid resource offer")
 )
 
 // WorkerSnapshot separates the last heartbeat from coordinator reservations.
@@ -32,11 +41,11 @@ type WorkerRegistry struct {
 
 func (r *WorkerRegistry) register(id plan.WorkerID, slots int) error {
 	if id == "" || slots <= 0 {
-		return fmt.Errorf("worker ID must be nonempty and slots positive")
+		return fmt.Errorf("%w: worker ID must be nonempty and slots positive", ErrInvalidWorker)
 	}
 	if worker := r.workers[id]; worker != nil {
 		if worker.TotalSlots != slots {
-			return fmt.Errorf("worker %q already has capacity %d", id, worker.TotalSlots)
+			return fmt.Errorf("%w: worker %q already has capacity %d", ErrWorkerConflict, id, worker.TotalSlots)
 		}
 		return nil
 	}
@@ -47,7 +56,7 @@ func (r *WorkerRegistry) register(id plan.WorkerID, slots int) error {
 func (r *WorkerRegistry) snapshot(id plan.WorkerID) (WorkerSnapshot, error) {
 	worker := r.workers[id]
 	if worker == nil {
-		return WorkerSnapshot{}, fmt.Errorf("unknown worker %q", id)
+		return WorkerSnapshot{}, fmt.Errorf("%w %q", ErrUnknownWorker, id)
 	}
 	snapshot := worker.WorkerSnapshot
 	snapshot.RunningAttemptIDs = append([]plan.TaskAttemptID(nil), worker.RunningAttemptIDs...)

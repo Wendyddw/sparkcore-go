@@ -233,8 +233,8 @@ func TestFIFORejectsInvalidWorkersOffersAndReports(t *testing.T) {
 		id    plan.WorkerID
 		slots int
 	}{{"", 1}, {"a", 0}, {"a", -1}} {
-		if err := s.RegisterWorker(registration.id, registration.slots); err == nil {
-			t.Fatal("invalid registration accepted")
+		if err := s.RegisterWorker(registration.id, registration.slots); !errors.Is(err, ErrInvalidWorker) {
+			t.Fatalf("invalid registration error = %v", err)
 		}
 	}
 	if err := s.RegisterWorker("a", 2); err != nil {
@@ -243,11 +243,11 @@ func TestFIFORejectsInvalidWorkersOffersAndReports(t *testing.T) {
 	if err := s.RegisterWorker("a", 2); err != nil {
 		t.Fatal("identical registration must be idempotent")
 	}
-	if err := s.RegisterWorker("a", 3); err == nil {
-		t.Fatal("conflicting registration accepted")
+	if err := s.RegisterWorker("a", 3); !errors.Is(err, ErrWorkerConflict) {
+		t.Fatalf("conflicting registration error = %v", err)
 	}
-	if _, err := s.Worker("missing"); err == nil {
-		t.Fatal("unknown worker found")
+	if _, err := s.Worker("missing"); !errors.Is(err, ErrUnknownWorker) {
+		t.Fatalf("unknown worker error = %v", err)
 	}
 	if err := s.RegisterWorker("b", 2); err != nil {
 		t.Fatal(err)
@@ -265,8 +265,12 @@ func TestFIFORejectsInvalidWorkersOffersAndReports(t *testing.T) {
 		{"a", 0, []plan.TaskAttemptID{a.Attempt.Identity.ID, a.Attempt.Identity.ID}},
 		{"a", 1, []plan.TaskAttemptID{999}}, {"b", 1, []plan.TaskAttemptID{a.Attempt.Identity.ID}},
 	} {
-		if _, err := s.OfferResources(offer.id, offer.free, offer.running); err == nil {
-			t.Fatalf("invalid offer accepted: %#v", offer)
+		want := ErrInvalidResourceOffer
+		if offer.id == "missing" {
+			want = ErrUnknownWorker
+		}
+		if _, err := s.OfferResources(offer.id, offer.free, offer.running); !errors.Is(err, want) {
+			t.Fatalf("invalid offer %#v: error = %v, want %v", offer, err, want)
 		}
 	}
 	after, _ := s.Worker("a")
