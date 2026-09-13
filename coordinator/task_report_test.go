@@ -284,7 +284,7 @@ func TestReportEndpointsRejectInvalidHTTPRequests(t *testing.T) {
 				invalid = strings.Replace(body, `"partition read failed"`, `""`, 1)
 			}
 			checkError(t, request(server.Handler, "POST", path, invalid), 400, protocol.CodeInvalidRequest)
-			limited, err := coordinator.NewServer(tasks, coordinator.Config{MaxRequestBytes: int64(len(body))})
+			limited, err := coordinator.NewServer(tasks, nil, coordinator.Config{MaxRequestBytes: int64(len(body))})
 			if err != nil {
 				t.Fatal(err)
 			}

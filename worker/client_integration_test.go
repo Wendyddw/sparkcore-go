@@ -20,7 +20,7 @@ func coordinatorClient(t *testing.T) (*scheduler.FIFOTaskScheduler, *worker.Clie
 	t.Helper()
 	tasks := scheduler.NewFIFOTaskScheduler()
 	t.Cleanup(tasks.Close)
-	server, err := coordinator.NewServer(tasks, coordinator.Config{})
+	server, err := coordinator.NewServer(tasks, nil, coordinator.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}

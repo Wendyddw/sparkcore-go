@@ -25,7 +25,7 @@ func TestTwoRuntimesExecuteNarrowPartitionsThroughCoordinator(t *testing.T) {
 		t.Run(string(action), func(t *testing.T) {
 			tasks := scheduler.NewFIFOTaskScheduler()
 			t.Cleanup(tasks.Close)
-			server, err := coordinator.NewServer(tasks, coordinator.Config{})
+			server, err := coordinator.NewServer(tasks, nil, coordinator.Config{})
 			if err != nil {
 				t.Fatal(err)
 			}

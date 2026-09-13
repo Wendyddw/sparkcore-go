@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/Wendyddw/sparkcore-go/api"
@@ -11,6 +12,9 @@ import (
 	"github.com/Wendyddw/sparkcore-go/protocol"
 	"github.com/Wendyddw/sparkcore-go/scheduler"
 )
+
+// ErrJobFailed marks a rejected plan or failed action; wrapped causes are retained.
+var ErrJobFailed = errors.New("job failed")
 
 // JobService builds submitted lineage and waits for distributed action results.
 // Concurrent submissions share a DAG scheduler but own separate lineage graphs.
@@ -44,7 +48,7 @@ func (s *JobService) Submit(ctx context.Context, spec jobspec.Spec) (protocol.Jo
 	driver := api.NewContext(s.registry, executor.NewSchedulerActionRunner(s.dag))
 	rdd, err := jobspec.Build(driver, spec)
 	if err != nil {
-		return protocol.JobResultResponse{}, fmt.Errorf("build job: %w", err)
+		return protocol.JobResultResponse{}, fmt.Errorf("%w: build job: %w", ErrJobFailed, err)
 	}
 	// Trigger DAG/FIFO scheduling and wait for the action result.
 	result := protocol.JobResultResponse{Action: spec.Action}
@@ -66,7 +70,7 @@ func (s *JobService) Submit(ctx context.Context, spec jobspec.Spec) (protocol.Jo
 		}
 	}
 	if err != nil {
-		return protocol.JobResultResponse{}, fmt.Errorf("run job: %w", err)
+		return protocol.JobResultResponse{}, fmt.Errorf("%w: run job: %w", ErrJobFailed, err)
 	}
 	// Return the completed result to the submission handler.
 	return result, nil

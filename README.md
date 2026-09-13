@@ -78,20 +78,21 @@ Heartbeat decoding validates the reported fields; handlers additionally call `Va
 
 ## Coordinator HTTP service
 
-`coordinator.NewServer(taskScheduler, config)` returns a standard `*http.Server` with an injected scheduling dependency. The caller starts it with `Serve` or `ListenAndServe` and drains active requests with `Shutdown(ctx)`. Scheduler shutdown remains the caller's responsibility.
+`coordinator.NewServer(taskScheduler, jobSubmitter, config)` returns a standard `*http.Server` with injected worker-scheduling and job-submission dependencies. Pass a `JobService` backed by the same FIFO scheduler; a nil submitter leaves worker endpoints available and returns `503` for job submissions. The caller starts it with `Serve` or `ListenAndServe` and drains active requests with `Shutdown(ctx)`. Scheduler shutdown remains the caller's responsibility.
 
-The worker HTTP API supports:
+The HTTP API supports:
 
 - `POST /v1/workers/register`: register a worker and its capacity. Repeating the same registration returns `200`; changing its capacity returns `409` without changing reservations. Optional `base_url` is validated but unused by heartbeat polling.
 - `POST /v1/workers/heartbeat`: validate reported capacity and running attempts, then return FIFO assignments up to available slots. No work returns `{"assignments":[]}`.
 - `POST /v1/tasks/success`: deliver partition output to the scheduler, which validates the assignment, releases its reservation once, and queues an observer callback.
 - `POST /v1/tasks/failure`: report a terminal error. The scheduler fails the task set without retry and keeps sibling reservations until those attempts report completion.
+- `POST /v1/jobs`: strictly decode the existing job specification, wait for distributed Count/Collect completion, and return `JobResultResponse` as JSON with status `200`.
 
 Successful report handling returns `200` with `{"acknowledged":true}`, including duplicate and obsolete reports. Acknowledgment confirms safe handling, not a state change. Late reports after task-set failure or cancellation release outstanding reservations without completion callbacks. Count stays `int64`; Collect records remain `json.RawMessage` elements in scheduler output to preserve numeric precision.
 
-Responses use `application/json`. Errors carry the protocol's stable code: invalid input is `400`, unknown workers/attempts/endpoints `404`, unsupported methods `405` with `Allow: POST`, registration or report-identity conflicts `409`, oversized requests `413`, closed scheduling `503`, and unexpected failures `500`.
+Responses use `application/json`. Errors carry the protocol's stable code: invalid input is `400`, unknown workers/attempts/endpoints `404`, unsupported methods `405` with `Allow: POST`, registration or report-identity conflicts `409`, oversized requests `413`, closed scheduling `503`, and unexpected failures `500`. Job planning/execution failures use `422` with `job_failed`; the job deadline uses `504` with `job_failed`. Internal error details are omitted.
 
-Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-second reads/writes, and 60-second idle connections. `Config` can override these values. Tests use `httptest` and the real FIFO scheduler to verify registration, assignment metadata, report callbacks, duplicate/late reports, concurrent offers/reports, reservations, and draining shutdown. The job submission HTTP endpoint and distributed commands remain pending.
+Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-second reads/writes, and 60-second idle connections. `Config` can override these values. Tests use `httptest` and the real FIFO scheduler to verify registration, assignment metadata, report callbacks, duplicate/late reports, concurrent offers/reports, reservations, and draining shutdown. Job submissions have a separate five-minute `Config.JobTimeout`. Their response write deadline includes the job wait, then returns to the configured write budget. ResponseWriter middleware must expose `Unwrap` or deadline methods to preserve this behavior. Distributed commands remain pending.
 
 ## Coordinator job service
 
@@ -99,7 +100,7 @@ Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-
 
 Accepted worker reports flow through FIFO observer callbacks into the DAG event loop. Results complete after all partitions succeed: Count is summed and Collect is merged in partition order with JSON integer precision preserved. Invalid plans, unknown functions and shuffle jobs fail before assignment. `Close()` cancels jobs and closes the DAG scheduler; the caller closes the shared FIFO scheduler separately.
 
-Canceling a submission context stops pending scheduling. Already assigned workers may finish; their late reports release reservations without changing the job result. The `POST /v1/jobs` endpoint, submit-client cancellation and blocking HTTP deadlines are the next implementation batch.
+Canceling a submission context stops pending scheduling. Already assigned workers may finish; their late reports release reservations without changing the job result. The HTTP handler passes the request context into `Submit` with a finite job deadline, so a disconnected submit client or expired deadline cancels scheduling. Workers keep polling after a job completes or fails. `ErrJobFailed` distinguishes planning/action failures from internal errors while preserving wrapped cancellation and scheduler-closure causes.
 
 ## Worker HTTP client
 
@@ -119,7 +120,7 @@ Tasks execute through `LocalRunner.RunTask`. Count and Collect outputs are conve
 
 Canceling Run stops polling, cancels execution, and waits for every task goroutine. Terminal reports get a separate bounded context to notify the coordinator during shutdown. Sources, functions and injected clients must cooperate with cancellation. Communication/protocol errors stop the runtime; failed reports may leave reservations until future worker-loss recovery. Each Runtime supports one startup.
 
-Integration tests run two worker instances through the real HTTP service and FIFO scheduler with separate function registries. Four narrow partitions produce Count `5` and the expected Collect records. The job service is implemented; its HTTP submission endpoint and standalone process commands are still pending.
+Integration tests run two worker instances through the real HTTP service and FIFO scheduler with separate function registries. Four narrow partitions produce Count `5` and the expected Collect records. End-to-end tests submit JSON through `POST /v1/jobs`, execute real text sources through two workers, return the final result, and run more jobs after a worker reports a source failure. Standalone process commands are still pending.
 
 ## Dependencies and stages
 
@@ -166,7 +167,7 @@ go vet ./...
 - Records use JSON-compatible values, and keys are strings.
 - Source paths refer to a shared filesystem. Local execution and workers must see the same paths.
 - Only narrow pipelines execute in Week 1. Shuffle storage, shuffle-map execution, reduce fetches, and barriers are not implemented yet.
-- The runnable job command is still local. Coordinator endpoints and the worker runtime are implemented and tested together over HTTP; the job submission HTTP endpoint and distributed commands remain pending. Heartbeat expiry and retry handling are deferred to Week 3.
+- The runnable job command is still local. Job submission, coordinator endpoints and the worker runtime are implemented and tested together over HTTP; distributed commands remain pending. Heartbeat expiry and retry handling are deferred to Week 3.
 - The project excludes SQL/Catalyst, joins, caching, streaming, speculative execution, dynamic allocation, advanced locality, disk spilling, production security, and a production UI.
 
 Week 2 introduces coordinator and worker boundaries, transport-friendly requests, worker registration/heartbeats, and retry-oriented task attempts while preserving the Week 1 planning model. Week 3 adds the shared shuffle store and executable one-shuffle `ReduceByKey` path.

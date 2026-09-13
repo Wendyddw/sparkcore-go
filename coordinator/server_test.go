@@ -21,7 +21,7 @@ func newService(t *testing.T, config coordinator.Config) (*scheduler.FIFOTaskSch
 	t.Helper()
 	tasks := scheduler.NewFIFOTaskScheduler()
 	t.Cleanup(tasks.Close)
-	server, err := coordinator.NewServer(tasks, config)
+	server, err := coordinator.NewServer(tasks, nil, config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestSchedulerErrorsHaveStableHTTPResponses(t *testing.T) {
 		{fmt.Errorf("wrapped: %w", scheduler.ErrWorkerConflict), 409, protocol.CodeConflict},
 		{errors.New("private scheduler detail"), 500, protocol.CodeInternal},
 	} {
-		server, err := coordinator.NewServer(failingRegistration{err: test.err}, coordinator.Config{})
+		server, err := coordinator.NewServer(failingRegistration{err: test.err}, nil, coordinator.Config{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,21 +201,21 @@ func TestServerConfiguration(t *testing.T) {
 	}
 	config := coordinator.Config{Addr: "127.0.0.1:0", MaxRequestBytes: 512, ReadHeaderTimeout: time.Second,
 		ReadTimeout: 2 * time.Second, WriteTimeout: 3 * time.Second, IdleTimeout: 4 * time.Second}
-	server, err := coordinator.NewServer(tasks, config)
+	server, err := coordinator.NewServer(tasks, nil, config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if server.Addr != config.Addr || server.ReadHeaderTimeout != config.ReadHeaderTimeout || server.ReadTimeout != config.ReadTimeout || server.WriteTimeout != config.WriteTimeout || server.IdleTimeout != config.IdleTimeout {
 		t.Fatalf("HTTP configuration was not applied: %#v", server)
 	}
-	if _, err := coordinator.NewServer(nil, config); err == nil {
+	if _, err := coordinator.NewServer(nil, nil, config); err == nil {
 		t.Fatal("nil scheduler accepted")
 	}
 	for _, invalid := range []coordinator.Config{
 		{MaxRequestBytes: -1}, {MaxRequestBytes: 1<<63 - 1},
-		{ReadHeaderTimeout: -1}, {ReadTimeout: -1}, {WriteTimeout: -1}, {IdleTimeout: -1},
+		{ReadHeaderTimeout: -1}, {ReadTimeout: -1}, {WriteTimeout: -1}, {IdleTimeout: -1}, {JobTimeout: -1},
 	} {
-		if _, err := coordinator.NewServer(tasks, invalid); err == nil {
+		if _, err := coordinator.NewServer(tasks, nil, invalid); err == nil {
 			t.Fatalf("invalid config accepted: %#v", invalid)
 		}
 	}
@@ -237,7 +237,7 @@ func TestShutdownDrainsActiveRequestAndLeavesSchedulerOwnedByCaller(t *testing.T
 	tasks := scheduler.NewFIFOTaskScheduler()
 	defer tasks.Close()
 	blocked := blockedRegistration{TaskScheduler: tasks, entered: make(chan struct{}), release: make(chan struct{})}
-	server, err := coordinator.NewServer(blocked, coordinator.Config{})
+	server, err := coordinator.NewServer(blocked, nil, coordinator.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}

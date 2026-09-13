@@ -2,6 +2,7 @@
 package coordinator
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,13 @@ type TaskScheduler interface {
 
 var _ TaskScheduler = (*scheduler.FIFOTaskScheduler)(nil)
 
+// JobSubmitter executes a submission and honors cancellation. Calls may overlap.
+type JobSubmitter interface {
+	Submit(context.Context, protocol.SubmitJobRequest) (protocol.JobResultResponse, error)
+}
+
+var _ JobSubmitter = (*JobService)(nil)
+
 // Config sets HTTP limits. Zero values select the defaults in NewServer.
 type Config struct {
 	Addr              string
@@ -32,19 +40,21 @@ type Config struct {
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
+	JobTimeout        time.Duration
 }
 
 // NewServer creates an HTTP server without starting it. Defaults are localhost:8080,
 // 1 MiB bodies, 5s header reads, 10s reads/writes, and 60s idle connections.
-// The caller owns serving and Shutdown; shutting down HTTP does not close tasks.
-func NewServer(tasks TaskScheduler, config Config) (*http.Server, error) {
+// Jobs get a separate 5m execution timeout plus the response write budget.
+// The caller owns serving, Shutdown and dependencies. Nil jobs disables submission.
+func NewServer(tasks TaskScheduler, jobs JobSubmitter, config Config) (*http.Server, error) {
 	if tasks == nil {
 		return nil, fmt.Errorf("task scheduler is nil")
 	}
 	if config.MaxRequestBytes < 0 || config.MaxRequestBytes == 1<<63-1 {
 		return nil, fmt.Errorf("max request bytes must be positive and bounded")
 	}
-	if config.ReadHeaderTimeout < 0 || config.ReadTimeout < 0 || config.WriteTimeout < 0 || config.IdleTimeout < 0 {
+	if config.ReadHeaderTimeout < 0 || config.ReadTimeout < 0 || config.WriteTimeout < 0 || config.IdleTimeout < 0 || config.JobTimeout < 0 {
 		return nil, fmt.Errorf("HTTP timeouts must not be negative")
 	}
 	if config.Addr == "" {
@@ -65,9 +75,13 @@ func NewServer(tasks TaskScheduler, config Config) (*http.Server, error) {
 	if config.IdleTimeout == 0 {
 		config.IdleTimeout = time.Minute
 	}
+	if config.JobTimeout == 0 {
+		config.JobTimeout = 5 * time.Minute
+	}
 	return &http.Server{
-		Addr:              config.Addr,
-		Handler:           &handler{tasks: tasks, maxRequestBytes: config.MaxRequestBytes},
+		Addr: config.Addr,
+		Handler: &handler{tasks: tasks, jobs: jobs, maxRequestBytes: config.MaxRequestBytes,
+			jobTimeout: config.JobTimeout, writeTimeout: config.WriteTimeout},
 		ReadHeaderTimeout: config.ReadHeaderTimeout,
 		ReadTimeout:       config.ReadTimeout,
 		WriteTimeout:      config.WriteTimeout,
@@ -77,7 +91,10 @@ func NewServer(tasks TaskScheduler, config Config) (*http.Server, error) {
 
 type handler struct {
 	tasks           TaskScheduler
+	jobs            JobSubmitter
 	maxRequestBytes int64
+	jobTimeout      time.Duration
+	writeTimeout    time.Duration
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +108,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		serve = h.taskSuccess
 	case protocol.TaskFailurePath:
 		serve = h.taskFailure
+	case protocol.SubmitJobPath:
+		serve = h.submitJob
 	default:
 		writeError(w, http.StatusNotFound, protocol.CodeNotFound, "unknown endpoint")
 		return
