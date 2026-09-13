@@ -55,7 +55,7 @@ Transformations such as `Map` and `Filter` are lazy: they append serializable me
 - `jobspec` decodes declarative JSON jobs and builds their lazy RDD lineage.
 - `protocol` defines the `/v1` HTTP/JSON messages, bounded strict decoding, and message validation.
 - `coordinator` exposes worker registration, heartbeat assignments, and terminal task reports through an injectable HTTP server.
-- `worker` provides the HTTP client for registration, heartbeat assignments, and terminal reports; the execution runtime is next.
+- `worker` provides the coordinator HTTP client and the polling runtime that executes assigned tasks through `LocalRunner`.
 - `cmd/local` runs supported jobs; `cmd/explain` prints lineage and stage plans without executing them.
 - `internal/examplefuncs` registers the functions referenced by the included examples.
 - `integration` verifies the public API through planning, scheduling, and execution.
@@ -91,7 +91,7 @@ Successful report handling returns `200` with `{"acknowledged":true}`, including
 
 Responses use `application/json`. Errors carry the protocol's stable code: invalid input is `400`, unknown workers/attempts/endpoints `404`, unsupported methods `405` with `Allow: POST`, registration or report-identity conflicts `409`, oversized requests `413`, closed scheduling `503`, and unexpected failures `500`.
 
-Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-second reads/writes, and 60-second idle connections. `Config` can override these values. Tests use `httptest` and the real FIFO scheduler to verify registration, assignment metadata, report callbacks, duplicate/late reports, concurrent offers/reports, reservations, and draining shutdown. Job submission, worker execution, and distributed commands follow in later batches.
+Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-second reads/writes, and 60-second idle connections. `Config` can override these values. Tests use `httptest` and the real FIFO scheduler to verify registration, assignment metadata, report callbacks, duplicate/late reports, concurrent offers/reports, reservations, and draining shutdown. Job submission and distributed commands follow in later sessions.
 
 ## Worker HTTP client
 
@@ -99,7 +99,19 @@ Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-
 
 Registration replies must match the requested identity and capacity. Heartbeat assignments must target the requesting worker, fit the offered slots, and avoid already-running attempt IDs. `worker.HTTPError` preserves coordinator HTTP status, error code, and message for `errors.As`; `ErrInvalidResponse` identifies malformed or inconsistent replies. Context and size errors remain available through `errors.Is`.
 
-The client is tested against the coordinator and FIFO scheduler, including duplicate terminal reports and precise JSON record payloads. It starts no background loops. Registration/polling, active-attempt tracking, bounded execution through `LocalRunner`, and worker shutdown are the next implementation batch.
+The client is tested against the coordinator and FIFO scheduler, including duplicate terminal reports and precise JSON record payloads. It starts no background loops; the runtime drives the worker lifecycle.
+
+## Worker runtime
+
+`worker.NewRuntime(client, worker.RuntimeConfig{...})` creates an independent function registry and `LocalRunner`. Supply a worker ID, positive slot count, and a `RegisterFunctions` hook for the named functions used by jobs. Sources default to the text reader and remain unopened until a task executes.
+
+`Run(ctx)` registers once, polls immediately, and then sends periodic heartbeats containing free slots and sorted active attempt IDs. The default polling interval is 100ms and each coordinator call has a 10-second timeout. One loop owns attempt tracking; task goroutines execute and report concurrently. A slot stays occupied until its terminal report is acknowledged. The runtime validates a complete assignment batch before dispatch and rejects excess work, foreign assignments and reused attempts.
+
+Tasks execute through `LocalRunner.RunTask`. Count and Collect outputs are converted to protocol messages, preserving empty arrays and JSON integer precision. Task or output-encoding errors become failure reports without retries; after an acknowledged task failure, the worker continues polling for other work.
+
+Canceling Run stops polling, cancels execution, and waits for every task goroutine. Terminal reports get a separate bounded context to notify the coordinator during shutdown. Sources, functions and injected clients must cooperate with cancellation. Communication/protocol errors stop the runtime; failed reports may leave reservations until future worker-loss recovery. Each Runtime supports one startup.
+
+Integration tests run two worker instances through the real HTTP service and FIFO scheduler with separate function registries. Four narrow partitions produce Count `5` and the expected Collect records. Job submission and standalone process commands are still pending.
 
 ## Dependencies and stages
 
@@ -142,11 +154,11 @@ go vet ./...
 
 ## Assumptions and limitations
 
-- Functions are registered under stable string IDs shared by the driver and future workers; arbitrary Go closures are not serialized.
+- Functions are registered under stable string IDs shared by the driver and workers; arbitrary Go closures are not serialized.
 - Records use JSON-compatible values, and keys are strings.
-- Source paths refer to a shared filesystem. Local execution reads them directly, and future workers are assumed to see the same paths.
+- Source paths refer to a shared filesystem. Local execution and workers must see the same paths.
 - Only narrow pipelines execute in Week 1. Shuffle storage, shuffle-map execution, reduce fetches, and barriers are not implemented yet.
-- Jobs still run in one process. Coordinator registration, heartbeat, and task report endpoints are implemented; job submission, worker runtime, and distributed commands remain pending. Heartbeat expiry and retry handling are deferred to Week 3.
+- The runnable job command is still local. Coordinator endpoints and the worker runtime are implemented and tested together over HTTP; job submission and distributed commands remain pending. Heartbeat expiry and retry handling are deferred to Week 3.
 - The project excludes SQL/Catalyst, joins, caching, streaming, speculative execution, dynamic allocation, advanced locality, disk spilling, production security, and a production UI.
 
 Week 2 introduces coordinator and worker boundaries, transport-friendly requests, worker registration/heartbeats, and retry-oriented task attempts while preserving the Week 1 planning model. Week 3 adds the shared shuffle store and executable one-shuffle `ReduceByKey` path.

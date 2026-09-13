@@ -1,4 +1,4 @@
-// Package worker provides the coordinator client for remote task execution.
+// Package worker polls the coordinator and executes assigned partition tasks.
 package worker
 
 import (
