@@ -55,6 +55,7 @@ Transformations such as `Map` and `Filter` are lazy: they append serializable me
 - `jobspec` decodes declarative JSON jobs and builds their lazy RDD lineage.
 - `protocol` defines the `/v1` HTTP/JSON messages, bounded strict decoding, and message validation.
 - `coordinator` exposes worker registration, heartbeat assignments, and terminal task reports through an injectable HTTP server.
+- `worker` provides the HTTP client for registration, heartbeat assignments, and terminal reports; the execution runtime is next.
 - `cmd/local` runs supported jobs; `cmd/explain` prints lineage and stage plans without executing them.
 - `internal/examplefuncs` registers the functions referenced by the included examples.
 - `integration` verifies the public API through planning, scheduling, and execution.
@@ -90,7 +91,15 @@ Successful report handling returns `200` with `{"acknowledged":true}`, including
 
 Responses use `application/json`. Errors carry the protocol's stable code: invalid input is `400`, unknown workers/attempts/endpoints `404`, unsupported methods `405` with `Allow: POST`, registration or report-identity conflicts `409`, oversized requests `413`, closed scheduling `503`, and unexpected failures `500`.
 
-Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-second reads/writes, and 60-second idle connections. `Config` can override these values. Tests use `httptest` and the real FIFO scheduler to verify registration, assignment metadata, report callbacks, duplicate/late reports, concurrent offers/reports, reservations, and draining shutdown. Job submission, worker runtime, and distributed commands follow in later sessions.
+Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-second reads/writes, and 60-second idle connections. `Config` can override these values. Tests use `httptest` and the real FIFO scheduler to verify registration, assignment metadata, report callbacks, duplicate/late reports, concurrent offers/reports, reservations, and draining shutdown. Job submission, worker execution, and distributed commands follow in later batches.
+
+## Worker HTTP client
+
+`worker.NewClient(coordinatorURL, worker.ClientConfig{})` provides context-aware `RegisterWorker`, `Heartbeat`, `ReportSuccess`, and `ReportFailure` calls using the protocol DTOs. It validates outgoing messages and bounded JSON responses, with a default 10-second request timeout and 1 MiB response limit. The client supports concurrent calls, closes response bodies, and does not follow redirects or perform application-level retries.
+
+Registration replies must match the requested identity and capacity. Heartbeat assignments must target the requesting worker, fit the offered slots, and avoid already-running attempt IDs. `worker.HTTPError` preserves coordinator HTTP status, error code, and message for `errors.As`; `ErrInvalidResponse` identifies malformed or inconsistent replies. Context and size errors remain available through `errors.Is`.
+
+The client is tested against the coordinator and FIFO scheduler, including duplicate terminal reports and precise JSON record payloads. It starts no background loops. Registration/polling, active-attempt tracking, bounded execution through `LocalRunner`, and worker shutdown are the next implementation batch.
 
 ## Dependencies and stages
 
