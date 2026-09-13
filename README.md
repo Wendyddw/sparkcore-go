@@ -54,7 +54,7 @@ Transformations such as `Map` and `Filter` are lazy: they append serializable me
 - `executor` contains records, the named-function registry, iterator pipelines, text partition readers, the local task-set scheduling adapter, and the bounded local task runner.
 - `jobspec` decodes declarative JSON jobs and builds their lazy RDD lineage.
 - `protocol` defines the `/v1` HTTP/JSON messages, bounded strict decoding, and message validation.
-- `coordinator` exposes worker registration, heartbeat assignments, and terminal task reports through an injectable HTTP server.
+- `coordinator` exposes worker lifecycle HTTP endpoints and a job service that builds lineage and runs actions through the DAG scheduler.
 - `worker` provides the coordinator HTTP client and the polling runtime that executes assigned tasks through `LocalRunner`.
 - `cmd/local` runs supported jobs; `cmd/explain` prints lineage and stage plans without executing them.
 - `internal/examplefuncs` registers the functions referenced by the included examples.
@@ -91,7 +91,15 @@ Successful report handling returns `200` with `{"acknowledged":true}`, including
 
 Responses use `application/json`. Errors carry the protocol's stable code: invalid input is `400`, unknown workers/attempts/endpoints `404`, unsupported methods `405` with `Allow: POST`, registration or report-identity conflicts `409`, oversized requests `413`, closed scheduling `503`, and unexpected failures `500`.
 
-Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-second reads/writes, and 60-second idle connections. `Config` can override these values. Tests use `httptest` and the real FIFO scheduler to verify registration, assignment metadata, report callbacks, duplicate/late reports, concurrent offers/reports, reservations, and draining shutdown. Job submission and distributed commands follow in later sessions.
+Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-second reads/writes, and 60-second idle connections. `Config` can override these values. Tests use `httptest` and the real FIFO scheduler to verify registration, assignment metadata, report callbacks, duplicate/late reports, concurrent offers/reports, reservations, and draining shutdown. The job submission HTTP endpoint and distributed commands remain pending.
+
+## Coordinator job service
+
+`coordinator.NewJobService(registry, taskScheduler)` starts an owned DAG scheduler. Pass the same FIFO scheduler to this service and the worker HTTP server. `Submit(ctx, spec)` builds a fresh lazy graph through the public API and blocks for Count/Collect completion. Concurrent jobs have separate graphs; the coordinator does not open source files or execute partition pipelines.
+
+Accepted worker reports flow through FIFO observer callbacks into the DAG event loop. Results complete after all partitions succeed: Count is summed and Collect is merged in partition order with JSON integer precision preserved. Invalid plans, unknown functions and shuffle jobs fail before assignment. `Close()` cancels jobs and closes the DAG scheduler; the caller closes the shared FIFO scheduler separately.
+
+Canceling a submission context stops pending scheduling. Already assigned workers may finish; their late reports release reservations without changing the job result. The `POST /v1/jobs` endpoint, submit-client cancellation and blocking HTTP deadlines are the next implementation batch.
 
 ## Worker HTTP client
 
@@ -111,7 +119,7 @@ Tasks execute through `LocalRunner.RunTask`. Count and Collect outputs are conve
 
 Canceling Run stops polling, cancels execution, and waits for every task goroutine. Terminal reports get a separate bounded context to notify the coordinator during shutdown. Sources, functions and injected clients must cooperate with cancellation. Communication/protocol errors stop the runtime; failed reports may leave reservations until future worker-loss recovery. Each Runtime supports one startup.
 
-Integration tests run two worker instances through the real HTTP service and FIFO scheduler with separate function registries. Four narrow partitions produce Count `5` and the expected Collect records. Job submission and standalone process commands are still pending.
+Integration tests run two worker instances through the real HTTP service and FIFO scheduler with separate function registries. Four narrow partitions produce Count `5` and the expected Collect records. The job service is implemented; its HTTP submission endpoint and standalone process commands are still pending.
 
 ## Dependencies and stages
 
@@ -158,7 +166,7 @@ go vet ./...
 - Records use JSON-compatible values, and keys are strings.
 - Source paths refer to a shared filesystem. Local execution and workers must see the same paths.
 - Only narrow pipelines execute in Week 1. Shuffle storage, shuffle-map execution, reduce fetches, and barriers are not implemented yet.
-- The runnable job command is still local. Coordinator endpoints and the worker runtime are implemented and tested together over HTTP; job submission and distributed commands remain pending. Heartbeat expiry and retry handling are deferred to Week 3.
+- The runnable job command is still local. Coordinator endpoints and the worker runtime are implemented and tested together over HTTP; the job submission HTTP endpoint and distributed commands remain pending. Heartbeat expiry and retry handling are deferred to Week 3.
 - The project excludes SQL/Catalyst, joins, caching, streaming, speculative execution, dynamic allocation, advanced locality, disk spilling, production security, and a production UI.
 
 Week 2 introduces coordinator and worker boundaries, transport-friendly requests, worker registration/heartbeats, and retry-oriented task attempts while preserving the Week 1 planning model. Week 3 adds the shared shuffle store and executable one-shuffle `ReduceByKey` path.
