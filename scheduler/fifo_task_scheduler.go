@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -68,6 +69,7 @@ type assignedAttempt struct {
 // It never reads RDD lineage. Observer callbacks run in ScheduleTaskSet, outside
 // the mutex; worker-facing methods only update state and enqueue reports.
 type FIFOTaskScheduler struct {
+	logger       *slog.Logger
 	mu           sync.Mutex
 	registry     WorkerRegistry
 	sets         map[taskSetKey]*fifoTaskSet
@@ -82,8 +84,9 @@ type FIFOTaskScheduler struct {
 var _ TaskSetScheduler = (*FIFOTaskScheduler)(nil)
 
 // NewFIFOTaskScheduler creates an empty scheduler with no workers or background loops.
-func NewFIFOTaskScheduler() *FIFOTaskScheduler {
+func NewFIFOTaskScheduler(options ...Option) *FIFOTaskScheduler {
 	return &FIFOTaskScheduler{
+		logger:   schedulerLogger("fifo_scheduler", options),
 		registry: WorkerRegistry{workers: make(map[plan.WorkerID]*workerState)},
 		sets:     make(map[taskSetKey]*fifoTaskSet),
 		attempts: make(map[plan.TaskAttemptID]*assignedAttempt),
@@ -148,8 +151,12 @@ func (s *FIFOTaskScheduler) ScheduleTaskSet(ctx context.Context, input TaskSet, 
 		s.mu.Unlock()
 		for _, report := range reports {
 			if report.success != nil {
+				r := report.success
+				s.logger.Info("task_succeeded", attemptLogFields(r.JobID, r.StageID, r.Attempt, r.PartitionID, r.WorkerID)...)
 				observer.TaskSucceeded(*report.success)
 			} else {
+				r := report.failure
+				s.logger.Error("task_failed", append(attemptLogFields(r.JobID, r.StageID, r.Attempt, r.PartitionID, r.WorkerID), "error", r.Error)...)
 				observer.TaskFailed(*report.failure)
 			}
 		}
@@ -192,8 +199,15 @@ func cloneTask(task Task) Task {
 // Running IDs may include already-reported attempts because reports and heartbeats
 // can cross in transit. Reservations absent from this heartbeat consume free slots.
 func (s *FIFOTaskScheduler) OfferResources(id plan.WorkerID, free int, running []plan.TaskAttemptID) ([]TaskAssignment, error) {
+	var assignments []TaskAssignment
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer func() {
+		s.mu.Unlock()
+		for _, assignment := range assignments {
+			a := assignment.Attempt
+			s.logger.Info("task_assigned", attemptLogFields(assignment.JobID, assignment.StageID, a.Identity, a.Task.PartitionID, a.WorkerID)...)
+		}
+	}()
 	if s.closed {
 		return nil, ErrTaskSchedulerClosed
 	}
@@ -222,7 +236,6 @@ func (s *FIFOTaskScheduler) OfferResources(id plan.WorkerID, free int, running [
 		}
 	}
 	available = min(available, worker.TotalSlots-len(worker.reserved))
-	var assignments []TaskAssignment
 	for _, set := range s.queue {
 		if set.terminal {
 			continue

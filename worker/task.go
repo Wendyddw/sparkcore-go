@@ -9,7 +9,16 @@ import (
 	"github.com/Wendyddw/sparkcore-go/scheduler"
 )
 
-func (w *Runtime) executeAndReport(ctx context.Context, assignment protocol.TaskAssignment) error {
+func (w *Runtime) executeAndReport(ctx context.Context, assignment protocol.TaskAssignment) (reportErr error) {
+	logger := w.logger.With("job_id", assignment.JobID, "stage_id", assignment.StageID,
+		"stage_attempt_id", assignment.Attempt.StageAttemptID, "task_id", assignment.Attempt.TaskID,
+		"attempt_id", assignment.Attempt.ID, "partition_id", assignment.Task.PartitionID)
+	logger.Info("task_started", "slots", w.config.Slots)
+	var taskErr error
+	defer func() {
+		logger.Info("task_finished", "execution_succeeded", taskErr == nil,
+			"report_acknowledged", reportErr == nil, "task_error", taskErr, "report_error", reportErr)
+	}()
 	result, taskErr := w.runner.RunTask(ctx, assignment.Task)
 	var output protocol.TaskOutput
 	if taskErr == nil {

@@ -25,14 +25,14 @@ type JobService struct {
 
 // NewJobService starts a DAG scheduler using the supplied physical scheduler.
 // Register named functions before submitting jobs. The caller owns tasks.
-func NewJobService(registry *executor.FunctionRegistry, tasks scheduler.TaskSetScheduler) (*JobService, error) {
+func NewJobService(registry *executor.FunctionRegistry, tasks scheduler.TaskSetScheduler, options ...scheduler.Option) (*JobService, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("function registry is nil")
 	}
 	if tasks == nil {
 		return nil, fmt.Errorf("task scheduler is nil")
 	}
-	return &JobService{registry: registry, dag: scheduler.NewDAGScheduler(registry, tasks)}, nil
+	return &JobService{registry: registry, dag: scheduler.NewDAGScheduler(registry, tasks, options...)}, nil
 }
 
 // Submit builds a lazy graph and blocks until its action succeeds or fails.

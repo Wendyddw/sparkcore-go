@@ -179,7 +179,21 @@ Ctrl-C or SIGTERM initiates daemon shutdown. The coordinator closes active jobs,
 
 Submission failure, timeout or signal cancellation exits with status 1 and prints an error on stderr; stdout remains empty until a complete valid result is ready. Successful submission exits with status 0 and prints only the result. Help goes to stderr and exits successfully. Canceling the submitter cancels its HTTP request and coordinator scheduling; already assigned workers may still finish and report.
 
-Process startup/shutdown diagnostics use JSON `slog` events on stderr. Daemon stdout stays empty. Detailed job, stage and task logging remains a later Session 7 batch.
+Process and scheduling diagnostics use JSON `slog` events on stderr. Daemon stdout stays empty; submit stdout contains only the final result.
+
+## Lifecycle logs
+
+The commands inject loggers into the schedulers and worker runtime. Library use remains silent by default: pass `scheduler.WithLogger(logger)` to the DAG/FIFO constructors or `coordinator.NewJobService`, and set `worker.RuntimeConfig.Logger` to enable events. No global logger is changed.
+
+| Component | Events | Meaning |
+| --- | --- | --- |
+| DAG scheduler | `job_submitted`, `stage_started`, `stage_succeeded`, `job_succeeded`, `job_failed` | Actions admitted to the DAG loop, stage execution, and final job outcome. Planning rejection produces `job_failed` without starting a stage. |
+| FIFO scheduler | `task_assigned`, `task_succeeded`, `task_failed` | Slot reservations and accepted attempt outcomes. Duplicate and obsolete reports do not produce another terminal event. |
+| Worker | `worker_registered`, `task_started`, `task_finished` | Worker readiness and each attempt's execution/reporting interval. `execution_succeeded` and `report_acknowledged` distinguish local execution from report delivery. |
+
+Task events include `job_id`, `stage_id`, `stage_attempt_id`, `task_id`, `attempt_id`, `partition_id`, and `worker_id` as structured fields, including zero IDs. Job/stage events include their relevant IDs and action/partition counts. Records are not logged. Assignment logging runs outside the placement lock; accepted outcomes are logged before notifying the DAG observer. Correlate processes by IDs; their logs do not form one globally ordered stream.
+
+The command checkpoint was verified with two two-slot workers: Count returned `5`, Collect returned `["alpha","beta","alpha","gamma","beta"]`, both workers received Count partitions, and each worker peaked at two active attempts. Eight unique attempts completed across the two successful jobs. The shuffle job produced one job failure with no assignments. All daemon signal exits were successful.
 
 ## Development checks
 
@@ -196,7 +210,7 @@ go vet ./...
 - Records use JSON-compatible values, and keys are strings.
 - Source paths refer to a shared filesystem. Local execution and workers must see the same paths.
 - Only narrow pipelines execute in Week 1. Shuffle storage, shuffle-map execution, reduce fetches, and barriers are not implemented yet.
-- Coordinator and worker processes can execute narrow jobs submitted over HTTP. Detailed scheduler lifecycle logs remain pending. Heartbeat expiry and retry handling are deferred to Week 3.
+- Coordinator and worker processes can execute narrow jobs submitted over HTTP. Structured lifecycle logs cover job, stage and attempt events. Heartbeat expiry and retry handling are deferred to Week 3.
 - The project excludes SQL/Catalyst, joins, caching, streaming, speculative execution, dynamic allocation, advanced locality, disk spilling, production security, and a production UI.
 
 Week 2 introduces coordinator and worker boundaries, transport-friendly requests, worker registration/heartbeats, and retry-oriented task attempts while preserving the Week 1 planning model. Week 3 adds the shared shuffle store and executable one-shuffle `ReduceByKey` path.

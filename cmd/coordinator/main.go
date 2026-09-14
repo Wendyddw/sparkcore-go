@@ -49,13 +49,14 @@ func run(ctx context.Context, args []string, diagnostics io.Writer) error {
 	}
 
 	// Share placement state between job scheduling and worker HTTP handlers.
+	logger := slog.New(slog.NewJSONHandler(diagnostics, nil))
 	registry := executor.NewFunctionRegistry()
 	if err := examplefuncs.Register(registry); err != nil {
 		return err
 	}
-	tasks := scheduler.NewFIFOTaskScheduler()
+	tasks := scheduler.NewFIFOTaskScheduler(scheduler.WithLogger(logger))
 	defer tasks.Close()
-	jobs, err := coordinator.NewJobService(registry, tasks)
+	jobs, err := coordinator.NewJobService(registry, tasks, scheduler.WithLogger(logger))
 	if err != nil {
 		return err
 	}
@@ -69,7 +70,6 @@ func run(ctx context.Context, args []string, diagnostics io.Writer) error {
 		return fmt.Errorf("listen: %w", err)
 	}
 	defer listener.Close()
-	logger := slog.New(slog.NewJSONHandler(diagnostics, nil))
 	logger.Info("coordinator_listening", "address", listener.Addr().String())
 
 	served := make(chan error, 1)

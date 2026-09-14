@@ -48,14 +48,14 @@ func run(ctx context.Context, args []string, diagnostics io.Writer) error {
 		return err
 	}
 	// Each worker owns its function registry and partition executor.
+	logger := slog.New(slog.NewJSONHandler(diagnostics, nil))
 	runtime, err := worker.NewRuntime(client, worker.RuntimeConfig{
 		WorkerID: plan.WorkerID(*id), Slots: *slots, HeartbeatInterval: *heartbeatInterval,
-		RequestTimeout: *requestTimeout, RegisterFunctions: examplefuncs.Register,
+		RequestTimeout: *requestTimeout, RegisterFunctions: examplefuncs.Register, Logger: logger,
 	})
 	if err != nil {
 		return err
 	}
-	logger := slog.New(slog.NewJSONHandler(diagnostics, nil))
 	logger.Info("worker_starting", "worker_id", *id, "slots", *slots, "coordinator", *coordinatorURL)
 	err = runtime.Run(ctx)
 	if err != nil && !(ctx.Err() != nil && errors.Is(err, ctx.Err())) {

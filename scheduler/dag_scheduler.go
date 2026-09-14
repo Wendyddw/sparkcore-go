@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 
@@ -41,6 +42,7 @@ type jobState struct {
 
 // DAGScheduler coordinates action jobs through one state-owning event loop.
 type DAGScheduler struct {
+	logger             *slog.Logger
 	planner            *Planner
 	taskScheduler      TaskSetScheduler
 	loop               *eventLoop
@@ -54,8 +56,9 @@ type DAGScheduler struct {
 }
 
 // NewDAGScheduler creates and starts an in-process DAG scheduler.
-func NewDAGScheduler(functions FunctionLookup, taskScheduler TaskSetScheduler) *DAGScheduler {
+func NewDAGScheduler(functions FunctionLookup, taskScheduler TaskSetScheduler, options ...Option) *DAGScheduler {
 	scheduler := &DAGScheduler{
+		logger:        schedulerLogger("dag_scheduler", options),
 		planner:       NewPlanner(functions),
 		taskScheduler: taskScheduler,
 		jobs:          make(map[plan.JobID]*jobState),
@@ -145,26 +148,27 @@ func (s *DAGScheduler) handleEvent(event schedulerEvent) {
 }
 
 func (s *DAGScheduler) handleJobSubmitted(event jobSubmitted) {
+	s.logger.Info("job_submitted", "job_id", event.jobID, "action", event.action.Kind, "rdd_id", event.action.TargetRDD)
 	if s.stopping {
-		event.response <- jobCompletion{err: ErrSchedulerClosed}
+		s.rejectJob(event, ErrSchedulerClosed)
 		return
 	}
 	if s.taskScheduler == nil {
-		event.response <- jobCompletion{err: fmt.Errorf("task scheduler is nil")}
+		s.rejectJob(event, fmt.Errorf("task scheduler is nil"))
 		return
 	}
 	stagePlan, err := s.planner.Plan(event.graph, event.action)
 	if err != nil {
-		event.response <- jobCompletion{err: err}
+		s.rejectJob(event, err)
 		return
 	}
 	if len(stagePlan.Stages) != 1 || stagePlan.Stages[0].Kind != StageResult || len(stagePlan.Stages[0].ParentIDs) != 0 {
-		event.response <- jobCompletion{err: fmt.Errorf("shuffle execution is not implemented")}
+		s.rejectJob(event, fmt.Errorf("shuffle execution is not implemented"))
 		return
 	}
 	tasks, err := GenerateTasks(stagePlan)
 	if err != nil {
-		event.response <- jobCompletion{err: err}
+		s.rejectJob(event, err)
 		return
 	}
 
@@ -187,10 +191,17 @@ func (s *DAGScheduler) handleJobSubmitted(event jobSubmitted) {
 		response:       event.response,
 		cancel:         cancel,
 	}
+	s.logger.Info("stage_started", "job_id", event.jobID, "stage_id", taskSet.StageID,
+		"stage_attempt_id", taskSet.StageAttemptID, "partition_count", len(tasks), "action", event.action.Kind)
 	s.workers.Add(1)
 	go s.watchCancellation(event.jobID, event.ctx, jobCtx)
 	s.workers.Add(1)
 	go s.scheduleTaskSet(jobCtx, taskSet)
+}
+
+func (s *DAGScheduler) rejectJob(event jobSubmitted, err error) {
+	s.logger.Error("job_failed", "job_id", event.jobID, "action", event.action.Kind, "error", err)
+	event.response <- jobCompletion{err: err}
 }
 
 func (s *DAGScheduler) scheduleTaskSet(ctx context.Context, taskSet TaskSet) {
@@ -270,6 +281,10 @@ func (s *DAGScheduler) handleTaskSucceeded(report TaskAttemptSuccess) {
 
 	job.status = stageSucceeded
 	result := mergeTaskOutputs(job.action.Kind, job.outputs)
+	s.logger.Info("stage_succeeded", "job_id", report.JobID, "stage_id", job.stageID,
+		"stage_attempt_id", job.stageAttemptID, "partition_count", len(job.tasks))
+	s.logger.Info("job_succeeded", "job_id", report.JobID, "action", job.action.Kind,
+		"count", result.Count, "record_count", len(result.Records))
 	job.cancel()
 	job.response <- jobCompletion{result: result}
 	delete(s.jobs, report.JobID)
@@ -280,6 +295,8 @@ func (s *DAGScheduler) failJob(jobID plan.JobID, err error) {
 	if !ok {
 		return
 	}
+	s.logger.Error("job_failed", "job_id", jobID, "stage_id", job.stageID,
+		"stage_attempt_id", job.stageAttemptID, "action", job.action.Kind, "error", err)
 	job.cancel()
 	job.response <- jobCompletion{err: err}
 	delete(s.jobs, jobID)

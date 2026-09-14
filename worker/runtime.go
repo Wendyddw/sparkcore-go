@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -33,10 +34,12 @@ type RuntimeConfig struct {
 	RequestTimeout    time.Duration
 	RegisterFunctions func(*executor.FunctionRegistry) error
 	Sources           executor.SourceReader
+	Logger            *slog.Logger // Nil disables runtime lifecycle logs.
 }
 
 // Runtime owns one worker's execution lifecycle. Use a new instance per startup.
 type Runtime struct {
+	logger  *slog.Logger
 	client  CoordinatorClient
 	config  RuntimeConfig
 	runner  *executor.LocalRunner
@@ -66,7 +69,12 @@ func NewRuntime(client CoordinatorClient, config RuntimeConfig) (*Runtime, error
 			return nil, fmt.Errorf("register worker functions: %w", err)
 		}
 	}
-	return &Runtime{client: client, config: config, runner: executor.NewLocalRunner(registry, config.Sources, config.Slots)}, nil
+	logger := config.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	return &Runtime{logger: logger.With("component", "worker", "worker_id", config.WorkerID),
+		client: client, config: config, runner: executor.NewLocalRunner(registry, config.Sources, config.Slots)}, nil
 }
 
 // runtimeState belongs to one Run call. Only the event loop mutates its maps;
@@ -132,6 +140,7 @@ func (w *Runtime) register(ctx context.Context) error {
 	if err := registration.Validate(); err != nil || registration.WorkerID != request.WorkerID || registration.TotalSlots != request.TotalSlots {
 		return fmt.Errorf("%w: registration does not match worker", ErrInvalidResponse)
 	}
+	w.logger.Info("worker_registered", "slots", w.config.Slots)
 	return nil
 }
 
