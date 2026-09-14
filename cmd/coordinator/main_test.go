@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -117,7 +118,7 @@ func TestCoordinatorInterruptCompletesBlockedSubmission(t *testing.T) {
 		}
 		assigned = len(heartbeat.Assignments) == 1
 		if !assigned {
-			time.Sleep(time.Millisecond)
+			runtime.Gosched()
 		}
 	}
 	if !assigned {

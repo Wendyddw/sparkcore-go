@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/Wendyddw/sparkcore-go/plan"
 )
@@ -25,7 +25,7 @@ func TestEventLoopHandlesEventsSerially(t *testing.T) {
 				break
 			}
 		}
-		time.Sleep(time.Millisecond)
+		runtime.Gosched()
 		mu.Lock()
 		handled = append(handled, event.(jobCanceled).jobID)
 		mu.Unlock()

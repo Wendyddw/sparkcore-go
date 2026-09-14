@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -120,5 +121,35 @@ func TestSubmitHTTPRejectsInvalidResults(t *testing.T) {
 			return result, nil
 		}), coordinator.Config{})
 		checkError(t, request(h, "POST", protocol.SubmitJobPath, countJobJSON), 500, protocol.CodeInternal)
+	}
+}
+
+// A wrapped ResponseWriter may fail either deadline update; never return success.
+type failingDeadlineWriter struct {
+	*httptest.ResponseRecorder
+	calls, failOn int
+}
+
+func (w *failingDeadlineWriter) SetWriteDeadline(time.Time) error {
+	w.calls++
+	if w.calls == w.failOn {
+		return errors.New("deadline unavailable")
+	}
+	return nil
+}
+
+func TestSubmitHTTPHandlesDeadlineConfigurationFailure(t *testing.T) {
+	for _, failOn := range []int{1, 2} {
+		calls := 0
+		h := jobHandler(t, submitFunc(func(context.Context, protocol.SubmitJobRequest) (protocol.JobResultResponse, error) {
+			calls++
+			return protocol.JobResultResponse{Action: scheduler.ActionCount, Count: 5}, nil
+		}), coordinator.Config{})
+		w := &failingDeadlineWriter{ResponseRecorder: httptest.NewRecorder(), failOn: failOn}
+		h.ServeHTTP(w, httptest.NewRequest("POST", protocol.SubmitJobPath, strings.NewReader(countJobJSON)))
+		checkError(t, w.ResponseRecorder, 500, protocol.CodeInternal)
+		if calls != failOn-1 {
+			t.Fatalf("deadline update %d: job submitted %d times", failOn, calls)
+		}
 	}
 }
