@@ -57,6 +57,7 @@ Transformations such as `Map` and `Filter` are lazy: they append serializable me
 - `coordinator` exposes worker lifecycle HTTP endpoints and a job service that builds lineage and runs actions through the DAG scheduler.
 - `worker` provides the coordinator HTTP client and the polling runtime that executes assigned tasks through `LocalRunner`.
 - `cmd/local` runs supported jobs; `cmd/explain` prints lineage and stage plans without executing them.
+- `cmd/coordinator` hosts job and worker APIs; `cmd/worker` runs an independently configured worker process.
 - `internal/examplefuncs` registers the functions referenced by the included examples.
 - `integration` verifies the public API through planning, scheduling, and execution.
 
@@ -92,7 +93,7 @@ Successful report handling returns `200` with `{"acknowledged":true}`, including
 
 Responses use `application/json`. Errors carry the protocol's stable code: invalid input is `400`, unknown workers/attempts/endpoints `404`, unsupported methods `405` with `Allow: POST`, registration or report-identity conflicts `409`, oversized requests `413`, closed scheduling `503`, and unexpected failures `500`. Job planning/execution failures use `422` with `job_failed`; the job deadline uses `504` with `job_failed`. Internal error details are omitted.
 
-Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-second reads/writes, and 60-second idle connections. `Config` can override these values. Tests use `httptest` and the real FIFO scheduler to verify registration, assignment metadata, report callbacks, duplicate/late reports, concurrent offers/reports, reservations, and draining shutdown. Job submissions have a separate five-minute `Config.JobTimeout`. Their response write deadline includes the job wait, then returns to the configured write budget. ResponseWriter middleware must expose `Unwrap` or deadline methods to preserve this behavior. Distributed commands remain pending.
+Defaults are `127.0.0.1:8080`, a 1 MiB request limit, 5-second header reads, 10-second reads/writes, and 60-second idle connections. `Config` can override these values. Tests use `httptest` and the real FIFO scheduler to verify registration, assignment metadata, report callbacks, duplicate/late reports, concurrent offers/reports, reservations, and draining shutdown. Job submissions have a separate five-minute `Config.JobTimeout`. Their response write deadline includes the job wait, then returns to the configured write budget. ResponseWriter middleware must expose `Unwrap` or deadline methods to preserve this behavior. Coordinator and worker commands are available; the submit command is next.
 
 ## Coordinator job service
 
@@ -120,7 +121,7 @@ Tasks execute through `LocalRunner.RunTask`. Count and Collect outputs are conve
 
 Canceling Run stops polling, cancels execution, and waits for every task goroutine. Terminal reports get a separate bounded context to notify the coordinator during shutdown. Sources, functions and injected clients must cooperate with cancellation. Communication/protocol errors stop the runtime; failed reports may leave reservations until future worker-loss recovery. Each Runtime supports one startup.
 
-Integration tests run two worker instances through the real HTTP service and FIFO scheduler with separate function registries. Four narrow partitions produce Count `5` and the expected Collect records. End-to-end tests submit JSON through `POST /v1/jobs`, execute real text sources through two workers, return the final result, and run more jobs after a worker reports a source failure. Standalone process commands are still pending.
+Integration tests run two worker instances through the real HTTP service and FIFO scheduler with separate function registries. Four narrow partitions produce Count `5` and the expected Collect records. End-to-end tests submit JSON through `POST /v1/jobs`, execute real text sources through two workers, return the final result, and run more jobs after a worker reports a source failure. Subprocess tests also verify the coordinator and worker command entry points, independent function registration, and interrupt handling.
 
 ## Dependencies and stages
 
@@ -152,6 +153,31 @@ go run ./cmd/explain --job examples/reduce_by_key.json
 
 The output contains the RDD lineage followed by a four-task `shuffle_map` stage and a dependent two-task `result` stage.
 
+## Coordinator and worker commands
+
+Run these in separate terminals from the repository root:
+
+```bash
+go run ./cmd/coordinator --listen 127.0.0.1:8080
+go run ./cmd/worker --coordinator http://127.0.0.1:8080 --id worker-1 --slots 2
+go run ./cmd/worker --coordinator http://127.0.0.1:8080 --id worker-2 --slots 2
+```
+
+Until `cmd/submit` is added, submit an example through the existing HTTP API:
+
+```bash
+curl --fail-with-body -H 'Content-Type: application/json' \
+  --data-binary @examples/count.json http://127.0.0.1:8080/v1/jobs
+```
+
+The response contains `{"action":"count","records":null,"count":5}`. Both commands register the example functions independently. All workers must see the source files at the paths in the job specification; relative paths resolve from each worker's working directory. Deploy matching function IDs and implementations in the coordinator and workers.
+
+Coordinator flags include `--listen` (default `127.0.0.1:8080`), `--job-timeout` (5m), and `--shutdown-timeout` (10s). Worker flags include `--coordinator`, required `--id`, `--slots` (2), `--heartbeat-interval` (100ms), and `--request-timeout` (10s). Polling frequency is configured by workers. Use `--help` for usage; unknown flags, extra arguments and nonpositive durations/capacities are rejected.
+
+Ctrl-C or SIGTERM initiates shutdown. The coordinator closes active jobs, drains HTTP within its shutdown timeout, and closes the FIFO scheduler; blocked submissions receive an unavailable response when the connection remains writable. Workers cancel their runtime, wait for task goroutines and allow bounded terminal reports. Stop workers before the coordinator when those reports need to be acknowledged. Operational errors exit with status 1; normal signal shutdown exits with status 0.
+
+Process startup/shutdown diagnostics use JSON `slog` events on stderr. Daemon stdout stays empty. Detailed job, stage and task logging remains a later Session 7 batch.
+
 ## Development checks
 
 ```bash
@@ -167,7 +193,7 @@ go vet ./...
 - Records use JSON-compatible values, and keys are strings.
 - Source paths refer to a shared filesystem. Local execution and workers must see the same paths.
 - Only narrow pipelines execute in Week 1. Shuffle storage, shuffle-map execution, reduce fetches, and barriers are not implemented yet.
-- The runnable job command is still local. Job submission, coordinator endpoints and the worker runtime are implemented and tested together over HTTP; distributed commands remain pending. Heartbeat expiry and retry handling are deferred to Week 3.
+- Coordinator and worker processes can execute narrow jobs submitted over HTTP. `cmd/submit` and detailed scheduler lifecycle logs remain pending. Heartbeat expiry and retry handling are deferred to Week 3.
 - The project excludes SQL/Catalyst, joins, caching, streaming, speculative execution, dynamic allocation, advanced locality, disk spilling, production security, and a production UI.
 
 Week 2 introduces coordinator and worker boundaries, transport-friendly requests, worker registration/heartbeats, and retry-oriented task attempts while preserving the Week 1 planning model. Week 3 adds the shared shuffle store and executable one-shuffle `ReduceByKey` path.
