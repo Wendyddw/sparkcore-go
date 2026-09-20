@@ -17,6 +17,7 @@ coverage.out
 
 # Local Codex/agent working memory
 /WEEK*_IMPLEMENTATION_PLAN.md
+/docs/week3-contracts.md
 /task_plan.md
 /findings.md
 /progress.md
