@@ -47,6 +47,7 @@ func TestWorkerMessagesPreserveV1JSONContract(t *testing.T) {
 func TestHeartbeatAssignmentPreservesIdentityAndNarrowPipeline(t *testing.T) {
 	const largeAttemptID plan.TaskAttemptID = 9007199254740993
 	assignment := protocol.TaskAssignment{
+		RunID: "0123456789abcdef0123456789abcdef",
 		JobID: 10, StageID: 2, WorkerID: "worker-a",
 		Attempt: scheduler.TaskAttemptIdentity{ID: largeAttemptID, TaskID: 8, StageAttemptID: 3},
 		Task: scheduler.Task{ID: 8, StageID: 2, StageKind: scheduler.StageResult, PartitionID: 1, NumPartitions: 4,
@@ -61,7 +62,7 @@ func TestHeartbeatAssignmentPreservesIdentityAndNarrowPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"assignments":[{"job_id":10,"stage_id":2,"worker_id":"worker-a","attempt":{"id":9007199254740993,"task_id":8,"stage_attempt_id":3},"task":{"id":8,"stage_id":2,"stage_kind":"result","partition_id":1,"num_partitions":4,"operations":[{"kind":"rdd","rdd":{"rdd_id":0,"operator":{"kind":"source","source_path":"/data/input.txt"}}},{"kind":"rdd","rdd":{"rdd_id":1,"operator":{"kind":"map","function_id":"normalize"}}},{"kind":"rdd","rdd":{"rdd_id":2,"operator":{"kind":"filter","function_id":"non_empty"}}}],"final_action":{"kind":"count","target_rdd":2}}}]}`
+	const want = `{"assignments":[{"run_id":"0123456789abcdef0123456789abcdef","job_id":10,"stage_id":2,"worker_id":"worker-a","attempt":{"id":9007199254740993,"task_id":8,"stage_attempt_id":3},"task":{"id":8,"stage_id":2,"stage_kind":"result","partition_id":1,"num_partitions":4,"operations":[{"kind":"rdd","rdd":{"rdd_id":0,"operator":{"kind":"source","source_path":"/data/input.txt"}}},{"kind":"rdd","rdd":{"rdd_id":1,"operator":{"kind":"map","function_id":"normalize"}}},{"kind":"rdd","rdd":{"rdd_id":2,"operator":{"kind":"filter","function_id":"non_empty"}}}],"final_action":{"kind":"count","target_rdd":2}}}]}`
 	if string(data) != want {
 		t.Fatalf("assignment JSON = %s, want %s", data, want)
 	}
@@ -75,7 +76,7 @@ func TestHeartbeatAssignmentPreservesIdentityAndNarrowPipeline(t *testing.T) {
 }
 
 func TestAssignmentPreservesZeroBasedIDs(t *testing.T) {
-	assignment := protocol.TaskAssignment{WorkerID: "worker-a", Task: scheduler.Task{StageKind: scheduler.StageResult, NumPartitions: 1}}
+	assignment := protocol.TaskAssignment{RunID: "0123456789abcdef0123456789abcdef", WorkerID: "worker-a", Task: scheduler.Task{StageKind: scheduler.StageResult, NumPartitions: 1}}
 	data, err := json.Marshal(assignment)
 	if err != nil {
 		t.Fatal(err)

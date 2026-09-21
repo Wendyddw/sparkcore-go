@@ -19,7 +19,7 @@ func (w *Runtime) executeAndReport(ctx context.Context, assignment protocol.Task
 		logger.Info("task_finished", "execution_succeeded", taskErr == nil,
 			"report_acknowledged", reportErr == nil, "task_error", taskErr, "report_error", reportErr)
 	}()
-	result, taskErr := w.runner.RunTask(ctx, assignment.Task)
+	result, taskErr := w.runner.RunTask(ctx, assignment.Execution())
 	var output protocol.TaskOutput
 	if taskErr == nil {
 		output, taskErr = encodeOutput(assignment.Task.FinalAction.Kind, result)

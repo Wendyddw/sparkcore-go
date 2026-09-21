@@ -109,6 +109,12 @@ func TestHeartbeatPreservesAssignmentPipelineAndReservations(t *testing.T) {
 		t.Fatalf("assignments = %d, want 2", len(assignments))
 	}
 	for i, assignment := range assignments {
+		if err := assignment.Execution().Validate(); err != nil {
+			t.Fatalf("invalid remote execution identity: %v", err)
+		}
+		if assignment.RunID != assignments[0].RunID {
+			t.Fatal("one scheduler returned different run namespaces")
+		}
 		wantTask := set.Tasks[len(set.Tasks)-1-i]
 		if assignment.JobID != set.JobID || assignment.StageID != set.StageID || assignment.WorkerID != "a" ||
 			assignment.Attempt.StageAttemptID != set.StageAttemptID || assignment.Attempt.TaskID != wantTask.ID ||

@@ -30,7 +30,7 @@ func TestLocalRunnerExecutesCompleteNarrowPipelineForCount(t *testing.T) {
 	}}
 	tasks := narrowTasks(t, scheduler.ActionCount, 1)
 
-	result, err := NewLocalRunner(registry, sources, 2).RunTask(context.Background(), tasks[0])
+	result, err := NewLocalRunner(registry, sources, 2).RunTask(context.Background(), runnerExecution(tasks[0]))
 	if err != nil {
 		t.Fatalf("RunTask() error = %v", err)
 	}
@@ -59,7 +59,7 @@ func TestLocalRunnerCountsFourTextFilePartitions(t *testing.T) {
 	var count int64
 	runner := NewLocalRunner(registry, TextSourceReader{}, 4)
 	for _, task := range tasks {
-		result, err := runner.RunTask(context.Background(), task)
+		result, err := runner.RunTask(context.Background(), runnerExecution(task))
 		if err != nil {
 			t.Fatalf("RunTask() error = %v", err)
 		}
@@ -79,7 +79,7 @@ func TestLocalRunnerReturnsPartitionScopedCollectOutput(t *testing.T) {
 	}}
 
 	result, err := NewLocalRunner(registry, sources, 4).RunTask(
-		context.Background(), narrowTasks(t, scheduler.ActionCollect, 4)[0],
+		context.Background(), runnerExecution(narrowTasks(t, scheduler.ActionCollect, 4)[0]),
 	)
 	if err != nil {
 		t.Fatalf("RunTask() error = %v", err)
@@ -98,7 +98,7 @@ func TestLocalRunnerCancellationStopsWork(t *testing.T) {
 	sources := blockingSourceReader{started: make(chan struct{})}
 	done := make(chan error, 1)
 	go func() {
-		_, err := NewLocalRunner(registry, sources, 2).RunTask(ctx, narrowTasks(t, scheduler.ActionCount, 4)[0])
+		_, err := NewLocalRunner(registry, sources, 2).RunTask(ctx, runnerExecution(narrowTasks(t, scheduler.ActionCount, 4)[0]))
 		done <- err
 	}()
 	<-sources.started
@@ -119,7 +119,7 @@ func TestLocalRunnerReturnsSourceErrors(t *testing.T) {
 	mustRegisterRunnerFilter(t, registry, "over-four", func(Record) (bool, error) { return true, nil })
 	tasks := narrowTasks(t, scheduler.ActionCount, 1)
 
-	_, err := NewLocalRunner(registry, failingSourceReader{}, 1).RunTask(context.Background(), tasks[0])
+	_, err := NewLocalRunner(registry, failingSourceReader{}, 1).RunTask(context.Background(), runnerExecution(tasks[0]))
 	if err == nil || !strings.Contains(err.Error(), "source failed") {
 		t.Fatalf("RunTask() error = %v, want source failure", err)
 	}
@@ -193,4 +193,33 @@ func mustRegisterRunnerFilter(t *testing.T, registry *FunctionRegistry, id strin
 	if err := registry.RegisterFilter(id, fn); err != nil {
 		t.Fatalf("RegisterFilter() error = %v", err)
 	}
+}
+
+func runnerExecution(task scheduler.Task) scheduler.TaskExecution {
+	return scheduler.TaskExecution{RunID: strings.Repeat("a", 32), JobID: 7,
+		Task: task, Attempt: scheduler.TaskAttemptIdentity{TaskID: task.ID}, WorkerID: "local"}
+}
+
+func TestLocalRunnerRejectsInvalidExecutionBeforeReadingSource(t *testing.T) {
+	for _, change := range []func(*scheduler.TaskExecution){
+		func(e *scheduler.TaskExecution) { e.RunID = "" },
+		func(e *scheduler.TaskExecution) { e.RunID = "../" + strings.Repeat("a", 29) },
+		func(e *scheduler.TaskExecution) { e.WorkerID = "" },
+		func(e *scheduler.TaskExecution) { e.Attempt.TaskID++ },
+	} {
+		sources := &identityGuardSource{}
+		execution := runnerExecution(narrowTasks(t, scheduler.ActionCount, 1)[0])
+		change(&execution)
+		_, err := NewLocalRunner(NewFunctionRegistry(), sources, 1).RunTask(context.Background(), execution)
+		if err == nil || sources.reads != 0 {
+			t.Fatalf("invalid identity reached execution: err=%v reads=%d", err, sources.reads)
+		}
+	}
+}
+
+type identityGuardSource struct{ reads int }
+
+func (s *identityGuardSource) Open(context.Context, string, plan.PartitionID, int) (Iterator, error) {
+	s.reads++
+	return &sliceIterator{}, nil
 }

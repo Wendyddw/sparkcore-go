@@ -74,8 +74,14 @@ func (r *LocalRunner) runTask(ctx context.Context, task scheduler.Task) (partiti
 	}
 }
 
-// RunTask executes one partition while respecting the runner's concurrency limit.
-func (r *LocalRunner) RunTask(ctx context.Context, task scheduler.Task) (scheduler.TaskOutput, error) {
+// RunTask executes one attempt while respecting the runner's concurrency limit.
+func (r *LocalRunner) RunTask(ctx context.Context, execution scheduler.TaskExecution) (scheduler.TaskOutput, error) {
+	if ctx == nil {
+		return scheduler.TaskOutput{}, fmt.Errorf("task context is nil")
+	}
+	if err := execution.Validate(); err != nil {
+		return scheduler.TaskOutput{}, err
+	}
 	if r == nil || r.registry == nil {
 		return scheduler.TaskOutput{}, fmt.Errorf("local runner function registry is nil")
 	}
@@ -92,7 +98,7 @@ func (r *LocalRunner) RunTask(ctx context.Context, task scheduler.Task) (schedul
 		return scheduler.TaskOutput{}, ctx.Err()
 	}
 
-	result, err := r.runTask(ctx, task)
+	result, err := r.runTask(ctx, execution.Task)
 	if err != nil {
 		return scheduler.TaskOutput{}, err
 	}

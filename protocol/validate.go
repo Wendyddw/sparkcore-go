@@ -91,7 +91,7 @@ func (r HeartbeatResponse) Validate() error {
 }
 
 func (a TaskAssignment) Validate() error {
-	if err := validateWorker(a.WorkerID); err != nil {
+	if err := a.Execution().Validate(); err != nil {
 		return err
 	}
 	task := a.Task

@@ -133,6 +133,8 @@ func TestDecodeAndValidateChecksNestedMetadataAndArrayElements(t *testing.T) {
 	}
 	valid := string(data)
 	for _, body := range []string{
+		strings.Replace(valid, `"run_id":"0123456789abcdef0123456789abcdef",`, "", 1),
+		strings.Replace(valid, `"run_id":"0123456789abcdef0123456789abcdef"`, `"run_id":null`, 1),
 		strings.Replace(valid, `"num_partitions":4,`, "", 1),
 		strings.Replace(valid, `"num_partitions":4`, `"num_partitions":null`, 1),
 		strings.Replace(valid, `"target_rdd":1`, `"target_rdd":null`, 1),

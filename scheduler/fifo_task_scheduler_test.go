@@ -83,6 +83,37 @@ func fifoWait(t *testing.T, done <-chan error) error {
 	}
 }
 
+func TestFIFORunNamespaceStableAcrossJobsAndDistinctAcrossSchedulers(t *testing.T) {
+	first, second := NewFIFOTaskScheduler(), NewFIFOTaskScheduler()
+	defer first.Close()
+	defer second.Close()
+	for _, s := range []*FIFOTaskScheduler{first, second} {
+		if err := s.RegisterWorker("a", 1); err != nil {
+			t.Fatal(err)
+		}
+		for job := 0; job < 2; job++ {
+			_, done := startFIFOSet(t, s, context.Background(), fifoSet(plan.JobID(job), 0))
+			assignments := fifoOffer(t, s, "a", 1)
+			if len(assignments) != 1 {
+				t.Fatalf("assignments = %d", len(assignments))
+			}
+			a := assignments[0]
+			execution := TaskExecution{RunID: a.RunID, JobID: a.JobID, Task: a.Attempt.Task,
+				Attempt: a.Attempt.Identity, WorkerID: a.Attempt.WorkerID}
+			if err := execution.Validate(); err != nil || a.RunID != s.runID {
+				t.Fatalf("invalid or inconsistent assignment namespace: %+v, %v", a, err)
+			}
+			fifoComplete(t, s, a)
+			if err := fifoWait(t, done); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if first.runID == second.runID {
+		t.Fatal("independent schedulers reused namespace")
+	}
+}
+
 func TestFIFOReservesInFlightSlotsAndOrdersPartitions(t *testing.T) {
 	s := NewFIFOTaskScheduler()
 	defer s.Close()

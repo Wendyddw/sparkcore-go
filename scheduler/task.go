@@ -2,6 +2,11 @@ package scheduler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"strings"
+
 	"github.com/Wendyddw/sparkcore-go/plan"
 )
 
@@ -64,7 +69,42 @@ type TaskAttemptFailure struct {
 	Error       string              `json:"error"`
 }
 
-// TaskRunner executes one logical partition outside the scheduler event loop.
+// TaskExecution supplies physical identity without changing the logical Task.
+// RunID is shared by all attempts from one physical scheduler instance.
+type TaskExecution struct {
+	RunID    string
+	JobID    plan.JobID
+	Task     Task
+	Attempt  TaskAttemptIdentity
+	WorkerID plan.WorkerID
+}
+
+// NewRunID creates a filesystem-safe namespace for a physical scheduler startup.
+func NewRunID() string {
+	var value [16]byte
+	// Go's crypto/rand.Read fills the buffer or terminates on entropy failure.
+	_, _ = rand.Read(value[:])
+	return hex.EncodeToString(value[:])
+}
+
+// Validate checks execution identity. Task pipeline validation remains separate.
+func (e TaskExecution) Validate() error {
+	if len(e.RunID) != 32 || strings.ToLower(e.RunID) != e.RunID {
+		return fmt.Errorf("run_id must contain 32 lowercase hexadecimal characters")
+	}
+	if _, err := hex.DecodeString(e.RunID); err != nil {
+		return fmt.Errorf("invalid run_id: %w", err)
+	}
+	if strings.TrimSpace(string(e.WorkerID)) == "" {
+		return fmt.Errorf("execution requires a worker ID")
+	}
+	if e.Attempt.TaskID != e.Task.ID {
+		return fmt.Errorf("execution attempt and task identities do not match")
+	}
+	return nil
+}
+
+// TaskRunner executes one physical attempt outside the scheduler event loop.
 type TaskRunner interface {
-	RunTask(context.Context, Task) (TaskOutput, error)
+	RunTask(context.Context, TaskExecution) (TaskOutput, error)
 }

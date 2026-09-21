@@ -15,7 +15,7 @@ import (
 )
 
 func validAssignment() protocol.TaskAssignment {
-	return protocol.TaskAssignment{WorkerID: "a", Task: scheduler.Task{
+	return protocol.TaskAssignment{RunID: "0123456789abcdef0123456789abcdef", WorkerID: "a", Task: scheduler.Task{
 		StageKind: scheduler.StageResult, NumPartitions: 4,
 		Operations: []scheduler.StageOperation{
 			{Kind: scheduler.StageOperationRDD, RDD: &scheduler.RDDOperationSpec{RDDID: 0, Operator: plan.OperatorSpec{Kind: plan.OpSource, SourcePath: "missing-source.txt"}}},
@@ -100,6 +100,9 @@ func TestAssignmentValidationRejectsInvalidPipelines(t *testing.T) {
 		change func(*protocol.TaskAssignment)
 	}{
 		{"worker", func(a *protocol.TaskAssignment) { a.WorkerID = "" }},
+		{"missing namespace", func(a *protocol.TaskAssignment) { a.RunID = "" }},
+		{"unsafe namespace", func(a *protocol.TaskAssignment) { a.RunID = "../" + strings.Repeat("a", 29) }},
+		{"uppercase namespace", func(a *protocol.TaskAssignment) { a.RunID = strings.Repeat("A", 32) }},
 		{"task identity", func(a *protocol.TaskAssignment) { a.Attempt.TaskID++ }},
 		{"stage identity", func(a *protocol.TaskAssignment) { a.StageID++ }},
 		{"negative partition", func(a *protocol.TaskAssignment) { a.Task.PartitionID = -1 }},

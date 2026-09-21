@@ -24,6 +24,7 @@ var (
 
 // TaskAssignment carries one physical assignment with its enclosing job identity.
 type TaskAssignment struct {
+	RunID   string
 	JobID   plan.JobID
 	StageID plan.StageID
 	Attempt TaskAttempt
@@ -69,6 +70,7 @@ type assignedAttempt struct {
 // It never reads RDD lineage. Observer callbacks run in ScheduleTaskSet, outside
 // the mutex; worker-facing methods only update state and enqueue reports.
 type FIFOTaskScheduler struct {
+	runID        string
 	logger       *slog.Logger
 	mu           sync.Mutex
 	registry     WorkerRegistry
@@ -86,6 +88,7 @@ var _ TaskSetScheduler = (*FIFOTaskScheduler)(nil)
 // NewFIFOTaskScheduler creates an empty scheduler with no workers or background loops.
 func NewFIFOTaskScheduler(options ...Option) *FIFOTaskScheduler {
 	return &FIFOTaskScheduler{
+		runID:    NewRunID(),
 		logger:   schedulerLogger("fifo_scheduler", options),
 		registry: WorkerRegistry{workers: make(map[plan.WorkerID]*workerState)},
 		sets:     make(map[taskSetKey]*fifoTaskSet),
@@ -251,7 +254,7 @@ func (s *FIFOTaskScheduler) OfferResources(id plan.WorkerID, free int, running [
 			s.nextAttempt++
 			task.state = TaskRunning
 			task.active = identity.ID
-			assignment := TaskAssignment{JobID: set.key.job, StageID: set.key.stage, Attempt: TaskAttempt{Identity: identity, Task: cloneTask(task.task), WorkerID: id, State: TaskRunning}}
+			assignment := TaskAssignment{RunID: s.runID, JobID: set.key.job, StageID: set.key.stage, Attempt: TaskAttempt{Identity: identity, Task: cloneTask(task.task), WorkerID: id, State: TaskRunning}}
 			s.attempts[identity.ID] = &assignedAttempt{assignment: assignment, set: set, task: task}
 			worker.reserved[identity.ID] = struct{}{}
 			// The returned pipeline must not alias scheduler-owned metadata.

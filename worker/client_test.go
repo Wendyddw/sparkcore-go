@@ -35,6 +35,7 @@ func newClient(t *testing.T, url string, config worker.ClientConfig) *worker.Cli
 
 func assignment() protocol.TaskAssignment {
 	return protocol.TaskAssignment{
+		RunID: "0123456789abcdef0123456789abcdef",
 		JobID: 7, StageID: 3, WorkerID: "a",
 		Attempt: scheduler.TaskAttemptIdentity{ID: 9007199254740993, TaskID: 11, StageAttemptID: 2},
 		Task: scheduler.Task{ID: 11, StageID: 3, StageKind: scheduler.StageResult, PartitionID: 0, NumPartitions: 1,

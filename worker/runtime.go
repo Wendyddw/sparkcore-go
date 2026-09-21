@@ -12,6 +12,7 @@ import (
 	"github.com/Wendyddw/sparkcore-go/executor"
 	"github.com/Wendyddw/sparkcore-go/plan"
 	"github.com/Wendyddw/sparkcore-go/protocol"
+	"github.com/Wendyddw/sparkcore-go/scheduler"
 )
 
 // CoordinatorClient methods must support concurrent calls and context cancellation.
@@ -42,7 +43,7 @@ type Runtime struct {
 	logger  *slog.Logger
 	client  CoordinatorClient
 	config  RuntimeConfig
-	runner  *executor.LocalRunner
+	runner  scheduler.TaskRunner
 	started atomic.Bool
 }
 

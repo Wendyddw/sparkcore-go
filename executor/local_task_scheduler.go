@@ -14,6 +14,7 @@ const localWorkerID plan.WorkerID = "local"
 
 // LocalTaskScheduler runs a task set through an in-process TaskRunner.
 type LocalTaskScheduler struct {
+	runID         string
 	runner        scheduler.TaskRunner
 	nextAttemptID atomic.Uint64
 }
@@ -22,7 +23,7 @@ var _ scheduler.TaskSetScheduler = (*LocalTaskScheduler)(nil)
 
 // NewLocalTaskScheduler creates the physical scheduling adapter used by local mode.
 func NewLocalTaskScheduler(runner scheduler.TaskRunner) *LocalTaskScheduler {
-	return &LocalTaskScheduler{runner: runner}
+	return &LocalTaskScheduler{runID: scheduler.NewRunID(), runner: runner}
 }
 
 // ScheduleTaskSet assigns one local attempt to every logical task and waits
@@ -52,7 +53,9 @@ func (s *LocalTaskScheduler) ScheduleTaskSet(
 		}
 		go func() {
 			defer attempts.Done()
-			output, err := s.runner.RunTask(ctx, task)
+			output, err := s.runner.RunTask(ctx, scheduler.TaskExecution{
+				RunID: s.runID, JobID: taskSet.JobID, Task: task, Attempt: identity, WorkerID: localWorkerID,
+			})
 			if err != nil {
 				observer.TaskFailed(scheduler.TaskAttemptFailure{
 					JobID:       taskSet.JobID,

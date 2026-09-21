@@ -102,7 +102,8 @@ type immediateTaskRunner struct {
 	failPartition plan.PartitionID
 }
 
-func (r *immediateTaskRunner) RunTask(_ context.Context, task scheduler.Task) (scheduler.TaskOutput, error) {
+func (r *immediateTaskRunner) RunTask(_ context.Context, execution scheduler.TaskExecution) (scheduler.TaskOutput, error) {
+	task := execution.Task
 	if task.PartitionID == r.failPartition && r.failPartition != 0 {
 		return scheduler.TaskOutput{}, errors.New("injected failure")
 	}
@@ -136,10 +137,49 @@ func (o *recordingTaskSetObserver) reports() ([]scheduler.TaskAttemptSuccess, []
 
 type cancelingTaskRunner struct{ started chan struct{} }
 
-func (r *cancelingTaskRunner) RunTask(ctx context.Context, _ scheduler.Task) (scheduler.TaskOutput, error) {
+func (r *cancelingTaskRunner) RunTask(ctx context.Context, _ scheduler.TaskExecution) (scheduler.TaskOutput, error) {
 	r.started <- struct{}{}
 	<-ctx.Done()
 	return scheduler.TaskOutput{}, ctx.Err()
+}
+
+type identityTaskRunner struct {
+	executions chan scheduler.TaskExecution
+}
+
+func (r *identityTaskRunner) RunTask(_ context.Context, execution scheduler.TaskExecution) (scheduler.TaskOutput, error) {
+	r.executions <- execution
+	return scheduler.TaskOutput{Count: 1}, execution.Validate()
+}
+
+func TestLocalTaskSchedulerPassesIdentityAndIsolatesRestarts(t *testing.T) {
+	runner := &identityTaskRunner{executions: make(chan scheduler.TaskExecution, 4)}
+	first, second := NewLocalTaskScheduler(runner), NewLocalTaskScheduler(runner)
+	for _, physical := range []*LocalTaskScheduler{first, second} {
+		for job := 0; job < 2; job++ {
+			set := scheduler.TaskSet{JobID: plan.JobID(job), StageID: 3, StageAttemptID: 4,
+				Tasks: []scheduler.Task{{ID: 5, StageID: 3, PartitionID: 0}}}
+			observer := &recordingTaskSetObserver{}
+			if err := physical.ScheduleTaskSet(context.Background(), set, observer); err != nil {
+				t.Fatal(err)
+			}
+			execution := <-runner.executions
+			successes, failures := observer.reports()
+			if len(failures) != 0 || len(successes) != 1 {
+				t.Fatalf("unexpected reports: %+v %+v", successes, failures)
+			}
+			report := successes[0]
+			if execution.RunID != physical.runID || execution.JobID != set.JobID ||
+				execution.WorkerID != report.WorkerID || execution.Attempt != report.Attempt ||
+				execution.Attempt.StageAttemptID != set.StageAttemptID || execution.Task.StageID != set.StageID ||
+				execution.Task.ID != set.Tasks[0].ID || execution.Task.PartitionID != report.PartitionID {
+				t.Fatalf("runner identity differs from scheduling/reporting: %+v %+v", execution, report)
+			}
+		}
+	}
+	if first.runID == second.runID {
+		t.Fatal("local scheduler restart reused namespace")
+	}
 }
 
 func TestLocalTaskSchedulerWaitsForCanceledAttemptsAndReports(t *testing.T) {

@@ -42,6 +42,7 @@ func (h *handler) heartbeat(w http.ResponseWriter, r *http.Request) {
 	response := protocol.HeartbeatResponse{Assignments: make([]protocol.TaskAssignment, 0, len(assignments))}
 	for _, assignment := range assignments {
 		response.Assignments = append(response.Assignments, protocol.TaskAssignment{
+			RunID:    assignment.RunID,
 			JobID:    assignment.JobID,
 			StageID:  assignment.StageID,
 			WorkerID: assignment.Attempt.WorkerID,
