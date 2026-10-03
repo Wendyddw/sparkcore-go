@@ -3,12 +3,26 @@ package executor
 import (
 	"context"
 	"fmt"
+	"io"
 )
 
 // Iterator produces records incrementally until ok is false.
+// Iterators holding resources also implement io.Closer for early termination.
 type Iterator interface {
 	Next(context.Context) (record Record, ok bool, err error)
 }
+
+func closeIterator(iterator Iterator) error {
+	if closer, ok := iterator.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
+func (i *mapIterator) Close() error      { return closeIterator(i.input) }
+func (i *filterIterator) Close() error   { return closeIterator(i.input) }
+func (i *pairMapIterator) Close() error  { return closeIterator(i.input) }
+func (i *valueMapIterator) Close() error { return closeIterator(i.input) }
 
 type sliceIterator struct {
 	records []Record

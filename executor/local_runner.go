@@ -2,17 +2,20 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/Wendyddw/sparkcore-go/scheduler"
+	"github.com/Wendyddw/sparkcore-go/shuffle"
 )
 
-// LocalRunner executes result tasks in-process with bounded concurrency.
+// LocalRunner executes partition tasks in-process with bounded concurrency.
 type LocalRunner struct {
 	registry       *FunctionRegistry
 	sources        SourceReader
 	maxConcurrency int
 	permits        chan struct{}
+	shuffleStore   shuffle.Store
 }
 
 var (
@@ -20,8 +23,16 @@ var (
 	_ scheduler.FunctionLookup = (*FunctionRegistry)(nil)
 )
 
+// RunnerOption configures an optional runner dependency.
+type RunnerOption func(*LocalRunner)
+
+// WithShuffleStore enables shuffle execution. The caller owns the store's lifetime.
+func WithShuffleStore(store shuffle.Store) RunnerOption {
+	return func(r *LocalRunner) { r.shuffleStore = store }
+}
+
 // NewLocalRunner creates an in-process task runner.
-func NewLocalRunner(registry *FunctionRegistry, sources SourceReader, maxConcurrency int) *LocalRunner {
+func NewLocalRunner(registry *FunctionRegistry, sources SourceReader, maxConcurrency int, options ...RunnerOption) *LocalRunner {
 	if sources == nil {
 		sources = TextSourceReader{}
 	}
@@ -29,12 +40,16 @@ func NewLocalRunner(registry *FunctionRegistry, sources SourceReader, maxConcurr
 	if maxConcurrency > 0 {
 		permits = make(chan struct{}, maxConcurrency)
 	}
-	return &LocalRunner{
+	runner := &LocalRunner{
 		registry:       registry,
 		sources:        sources,
 		maxConcurrency: maxConcurrency,
 		permits:        permits,
 	}
+	for _, option := range options {
+		option(runner)
+	}
+	return runner
 }
 
 type partitionResult struct {
@@ -42,19 +57,19 @@ type partitionResult struct {
 	count   int64
 }
 
-func (r *LocalRunner) runTask(ctx context.Context, task scheduler.Task) (partitionResult, error) {
+func (r *LocalRunner) runTask(ctx context.Context, task scheduler.Task) (result partitionResult, err error) {
 	if task.StageKind != scheduler.StageResult || task.FinalAction == nil {
-		return partitionResult{}, fmt.Errorf("only result-stage tasks are executable locally")
+		return partitionResult{}, fmt.Errorf("result task requires a result stage and final action")
 	}
 	if task.ShuffleWrite != nil {
-		return partitionResult{}, fmt.Errorf("shuffle write is not implemented in Week 1")
+		return partitionResult{}, fmt.Errorf("result task must not have a shuffle write")
 	}
 
 	iterator, err := buildTaskIterator(ctx, task, r.registry, r.sources)
 	if err != nil {
 		return partitionResult{}, err
 	}
-	var result partitionResult
+	defer func() { err = errors.Join(err, closeIterator(iterator)) }()
 	for {
 		record, ok, err := iterator.Next(ctx)
 		if err != nil {
@@ -95,7 +110,13 @@ func (r *LocalRunner) RunTask(ctx context.Context, execution scheduler.TaskExecu
 	case r.permits <- struct{}{}:
 		defer func() { <-r.permits }()
 	case <-ctx.Done():
-		return scheduler.TaskOutput{}, ctx.Err()
+		return scheduler.TaskOutput{}, context.Cause(ctx)
+	}
+	if err := context.Cause(ctx); err != nil {
+		return scheduler.TaskOutput{}, err
+	}
+	if execution.Task.StageKind == scheduler.StageShuffleMap {
+		return r.runShuffleMap(ctx, execution)
 	}
 
 	result, err := r.runTask(ctx, execution.Task)

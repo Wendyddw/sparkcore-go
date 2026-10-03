@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/Wendyddw/sparkcore-go/plan"
@@ -13,11 +14,16 @@ func buildTaskIterator(
 	task scheduler.Task,
 	registry *FunctionRegistry,
 	sources SourceReader,
-) (Iterator, error) {
+) (result Iterator, err error) {
 	var iterator Iterator
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, closeIterator(iterator))
+		}
+	}()
 	for _, operation := range task.Operations {
 		if operation.Kind == scheduler.StageOperationShuffleRead {
-			return nil, fmt.Errorf("shuffle read is not implemented in Week 1")
+			return nil, fmt.Errorf("shuffle read is not implemented yet")
 		}
 		if operation.Kind != scheduler.StageOperationRDD || operation.RDD == nil {
 			return nil, fmt.Errorf("invalid stage operation %q", operation.Kind)

@@ -118,8 +118,14 @@ func (i *textPartitionIterator) Next(ctx context.Context) (Record, bool, error) 
 }
 
 func (i *textPartitionIterator) close() {
+	_ = i.Close()
+}
+
+// Close releases the source file, including when a downstream operator fails.
+func (i *textPartitionIterator) Close() error {
 	if !i.done {
 		i.done = true
-		_ = i.file.Close()
+		return i.file.Close()
 	}
+	return nil
 }

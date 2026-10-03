@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Wendyddw/sparkcore-go/plan"
+	"github.com/Wendyddw/sparkcore-go/shuffle"
 )
 
 // schedulerEvent is handled only by the scheduler event loop.
@@ -61,6 +62,8 @@ func (schedulerStopping) isSchedulerEvent() {}
 type TaskOutput struct {
 	Records []any
 	Count   int64
+	// ShuffleOutput is published map output; scheduler acceptance happens separately.
+	ShuffleOutput *shuffle.MapOutput
 }
 
 // jobCompletion is delivered exactly once to the action caller.
