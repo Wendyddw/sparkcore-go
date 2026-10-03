@@ -7,14 +7,17 @@ import (
 
 	"github.com/Wendyddw/sparkcore-go/plan"
 	"github.com/Wendyddw/sparkcore-go/scheduler"
+	"github.com/Wendyddw/sparkcore-go/shuffle"
 )
 
 func buildTaskIterator(
 	ctx context.Context,
-	task scheduler.Task,
+	execution scheduler.TaskExecution,
 	registry *FunctionRegistry,
 	sources SourceReader,
+	store shuffle.Store,
 ) (result Iterator, err error) {
+	task := execution.Task
 	var iterator Iterator
 	defer func() {
 		if err != nil {
@@ -23,7 +26,8 @@ func buildTaskIterator(
 	}()
 	for _, operation := range task.Operations {
 		if operation.Kind == scheduler.StageOperationShuffleRead {
-			return nil, fmt.Errorf("shuffle read is not implemented yet")
+			iterator = &shuffleIterator{store: store, inputs: execution.ShuffleInputs.Clone(), partition: task.PartitionID}
+			continue
 		}
 		if operation.Kind != scheduler.StageOperationRDD || operation.RDD == nil {
 			return nil, fmt.Errorf("invalid stage operation %q", operation.Kind)
@@ -79,8 +83,17 @@ func buildTaskIterator(
 				return nil, err
 			}
 			iterator = &valueMapIterator{input: iterator, fn: fn}
+		case plan.OpReduceByKey:
+			if iterator == nil {
+				return nil, fmt.Errorf("reduce-by-key has no input iterator")
+			}
+			fn, err := registry.Reduce(operator.FunctionID)
+			if err != nil {
+				return nil, err
+			}
+			iterator = &reduceIterator{input: iterator, fn: fn}
 		default:
-			return nil, fmt.Errorf("operator %q is not supported by the narrow executor", operator.Kind)
+			return nil, fmt.Errorf("operator %q is not supported by the executor", operator.Kind)
 		}
 	}
 	if iterator == nil {

@@ -51,7 +51,7 @@ func (r *LocalRunner) runShuffleMap(ctx context.Context, execution scheduler.Tas
 		}
 	}()
 
-	iterator, err := buildTaskIterator(ctx, task, r.registry, r.sources)
+	iterator, err := buildTaskIterator(ctx, execution, r.registry, r.sources, r.shuffleStore)
 	if err != nil {
 		return output, err
 	}

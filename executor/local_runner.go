@@ -57,7 +57,8 @@ type partitionResult struct {
 	count   int64
 }
 
-func (r *LocalRunner) runTask(ctx context.Context, task scheduler.Task) (result partitionResult, err error) {
+func (r *LocalRunner) runTask(ctx context.Context, execution scheduler.TaskExecution) (result partitionResult, err error) {
+	task := execution.Task
 	if task.StageKind != scheduler.StageResult || task.FinalAction == nil {
 		return partitionResult{}, fmt.Errorf("result task requires a result stage and final action")
 	}
@@ -65,7 +66,7 @@ func (r *LocalRunner) runTask(ctx context.Context, task scheduler.Task) (result 
 		return partitionResult{}, fmt.Errorf("result task must not have a shuffle write")
 	}
 
-	iterator, err := buildTaskIterator(ctx, task, r.registry, r.sources)
+	iterator, err := buildTaskIterator(ctx, execution, r.registry, r.sources, r.shuffleStore)
 	if err != nil {
 		return partitionResult{}, err
 	}
@@ -106,6 +107,9 @@ func (r *LocalRunner) RunTask(ctx context.Context, execution scheduler.TaskExecu
 	if r.maxConcurrency <= 0 || r.permits == nil {
 		return scheduler.TaskOutput{}, fmt.Errorf("local runner concurrency must be positive")
 	}
+	if err := validateShuffleExecution(execution, r.shuffleStore); err != nil {
+		return scheduler.TaskOutput{}, err
+	}
 	select {
 	case r.permits <- struct{}{}:
 		defer func() { <-r.permits }()
@@ -119,8 +123,11 @@ func (r *LocalRunner) RunTask(ctx context.Context, execution scheduler.TaskExecu
 		return r.runShuffleMap(ctx, execution)
 	}
 
-	result, err := r.runTask(ctx, execution.Task)
+	result, err := r.runTask(ctx, execution)
 	if err != nil {
+		return scheduler.TaskOutput{}, err
+	}
+	if err := context.Cause(ctx); err != nil {
 		return scheduler.TaskOutput{}, err
 	}
 	records := make([]any, len(result.records))
