@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Wendyddw/sparkcore-go/plan"
+	"github.com/Wendyddw/sparkcore-go/shuffle"
 )
 
 // Task is the stable logical work for one stage partition.
@@ -72,11 +73,12 @@ type TaskAttemptFailure struct {
 // TaskExecution supplies physical identity without changing the logical Task.
 // RunID is shared by all attempts from one physical scheduler instance.
 type TaskExecution struct {
-	RunID    string
-	JobID    plan.JobID
-	Task     Task
-	Attempt  TaskAttemptIdentity
-	WorkerID plan.WorkerID
+	RunID         string
+	JobID         plan.JobID
+	Task          Task
+	Attempt       TaskAttemptIdentity
+	WorkerID      plan.WorkerID
+	ShuffleInputs *shuffle.InputSnapshot
 }
 
 // NewRunID creates a filesystem-safe namespace for a physical scheduler startup.
