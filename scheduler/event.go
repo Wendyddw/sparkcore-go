@@ -36,6 +36,7 @@ func (taskFailed) isSchedulerEvent() {}
 // taskSetFinished ensures scheduling errors or incomplete submissions unblock the job.
 type taskSetFinished struct {
 	jobID          plan.JobID
+	stageID        plan.StageID
 	stageAttemptID plan.StageAttemptID
 	err            error
 }

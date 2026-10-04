@@ -20,26 +20,6 @@ type JobResult struct {
 	Count   int64
 }
 
-type stageExecutionStatus uint8
-
-const (
-	stageRunning stageExecutionStatus = iota
-	stageSucceeded
-)
-
-type jobState struct {
-	action         ActionSpec
-	stageID        plan.StageID
-	stageAttemptID plan.StageAttemptID
-	tasks          map[plan.PartitionID]plan.TaskID
-	ctx            context.Context
-	status         stageExecutionStatus
-	remaining      int
-	outputs        map[plan.PartitionID]TaskOutput
-	response       chan<- jobCompletion
-	cancel         context.CancelFunc
-}
-
 // DAGScheduler coordinates action jobs through one state-owning event loop.
 type DAGScheduler struct {
 	logger             *slog.Logger
@@ -130,16 +110,22 @@ func (s *DAGScheduler) handleEvent(event schedulerEvent) {
 			s.failJob(report.JobID, err)
 		}
 	case taskSetFinished:
-		if job := s.jobs[event.jobID]; job != nil && job.stageAttemptID == event.stageAttemptID {
-			err := event.err
-			if job.ctx.Err() != nil {
-				err = job.ctx.Err()
-			}
-			if err == nil {
-				err = fmt.Errorf("task scheduler exited with %d unfinished partitions", job.remaining)
-			}
-			s.failJob(event.jobID, err)
+		job := s.jobs[event.jobID]
+		if job == nil {
+			return
 		}
+		stage := job.stages[event.stageID]
+		if stage == nil || stage.status != stageRunning || stage.attemptID != event.stageAttemptID {
+			return
+		}
+		err := event.err
+		if job.ctx.Err() != nil {
+			err = job.ctx.Err()
+		}
+		if err == nil {
+			err = fmt.Errorf("task scheduler exited with %d unfinished partitions", stage.remaining)
+		}
+		s.failJob(event.jobID, err)
 	case jobCanceled:
 		s.failJob(event.jobID, event.err)
 	case schedulerStopping:
@@ -162,8 +148,8 @@ func (s *DAGScheduler) handleJobSubmitted(event jobSubmitted) {
 		s.rejectJob(event, err)
 		return
 	}
-	if len(stagePlan.Stages) != 1 || stagePlan.Stages[0].Kind != StageResult || len(stagePlan.Stages[0].ParentIDs) != 0 {
-		s.rejectJob(event, fmt.Errorf("shuffle execution is not implemented"))
+	if err := validateExecutionPlan(stagePlan); err != nil {
+		s.rejectJob(event, err)
 		return
 	}
 	tasks, err := GenerateTasks(stagePlan)
@@ -171,32 +157,25 @@ func (s *DAGScheduler) handleJobSubmitted(event jobSubmitted) {
 		s.rejectJob(event, err)
 		return
 	}
-
 	jobCtx, cancel := context.WithCancel(event.ctx)
-	taskSet := TaskSet{JobID: event.jobID, StageID: stagePlan.Stages[0].ID, StageAttemptID: s.nextStageAttemptID, Tasks: tasks}
-	s.nextStageAttemptID++
-	logicalTasks := make(map[plan.PartitionID]plan.TaskID, len(tasks))
+	job := &jobState{action: event.action, ctx: jobCtx, cancel: cancel, response: event.response,
+		stages: make(map[plan.StageID]*stageState)}
+	for _, stage := range stagePlan.Stages {
+		job.order = append(job.order, stage.ID)
+		job.stages[stage.ID] = &stageState{stage: stage, status: stagePending, outputs: make(map[plan.PartitionID]TaskOutput), remaining: stage.NumPartitions}
+		if stage.Kind == StageResult {
+			job.resultStageID = stage.ID
+		}
+	}
 	for _, task := range tasks {
-		logicalTasks[task.PartitionID] = task.ID
+		job.stages[task.StageID].tasks = append(job.stages[task.StageID].tasks, task)
 	}
-	s.jobs[event.jobID] = &jobState{
-		action:         event.action,
-		stageID:        taskSet.StageID,
-		stageAttemptID: taskSet.StageAttemptID,
-		tasks:          logicalTasks,
-		ctx:            jobCtx,
-		status:         stageRunning,
-		remaining:      len(tasks),
-		outputs:        make(map[plan.PartitionID]TaskOutput, len(tasks)),
-		response:       event.response,
-		cancel:         cancel,
-	}
-	s.logger.Info("stage_started", "job_id", event.jobID, "stage_id", taskSet.StageID,
-		"stage_attempt_id", taskSet.StageAttemptID, "partition_count", len(tasks), "action", event.action.Kind)
+	s.jobs[event.jobID] = job
 	s.workers.Add(1)
 	go s.watchCancellation(event.jobID, event.ctx, jobCtx)
-	s.workers.Add(1)
-	go s.scheduleTaskSet(jobCtx, taskSet)
+	if err := s.startReadyStages(event.jobID, job); err != nil {
+		s.failJob(event.jobID, err)
+	}
 }
 
 func (s *DAGScheduler) rejectJob(event jobSubmitted, err error) {
@@ -206,26 +185,33 @@ func (s *DAGScheduler) rejectJob(event jobSubmitted, err error) {
 
 func (s *DAGScheduler) scheduleTaskSet(ctx context.Context, taskSet TaskSet) {
 	defer s.workers.Done()
-	observer := dagTaskSetObserver{loop: s.loop, jobID: taskSet.JobID}
+	observer := dagTaskSetObserver{loop: s.loop, jobID: taskSet.JobID, stageID: taskSet.StageID, stageAttemptID: taskSet.StageAttemptID}
 	err := s.taskScheduler.ScheduleTaskSet(ctx, taskSet, observer)
-	_ = s.loop.send(context.Background(), taskSetFinished{jobID: taskSet.JobID, stageAttemptID: taskSet.StageAttemptID, err: err})
+	_ = s.loop.send(context.Background(), taskSetFinished{jobID: taskSet.JobID, stageID: taskSet.StageID, stageAttemptID: taskSet.StageAttemptID, err: err})
 }
 
 // Callbacks only enqueue events; job state remains owned by the event loop.
 // Scope each observer to its submission so a malformed report cannot affect another job.
 type dagTaskSetObserver struct {
-	loop  *eventLoop
-	jobID plan.JobID
+	loop           *eventLoop
+	jobID          plan.JobID
+	stageID        plan.StageID
+	stageAttemptID plan.StageAttemptID
 }
 
 func (o dagTaskSetObserver) TaskSucceeded(report TaskAttemptSuccess) {
-	if report.JobID == o.jobID {
+	if report.JobID == o.jobID && report.StageID == o.stageID && report.Attempt.StageAttemptID == o.stageAttemptID {
+		report.Output = report.Output.Clone()
 		_ = o.loop.send(context.Background(), taskSucceeded{report})
 	}
 }
 
 func (o dagTaskSetObserver) TaskFailed(report TaskAttemptFailure) {
-	if report.JobID == o.jobID {
+	if report.JobID == o.jobID && report.StageID == o.stageID && report.Attempt.StageAttemptID == o.stageAttemptID {
+		if report.ShuffleInput != nil {
+			copy := *report.ShuffleInput
+			report.ShuffleInput = &copy
+		}
 		_ = o.loop.send(context.Background(), taskFailed{report})
 	}
 }
@@ -251,14 +237,17 @@ func (s *DAGScheduler) handleStopping(event schedulerStopping) {
 // for accepting only the current task attempt before notifying the observer.
 func (s *DAGScheduler) pendingTask(jobID plan.JobID, stageID plan.StageID, attempt TaskAttemptIdentity, partition plan.PartitionID) *jobState {
 	job := s.jobs[jobID]
-	if job == nil || job.status != stageRunning || stageID != job.stageID || attempt.StageAttemptID != job.stageAttemptID {
+	if job == nil {
 		return nil
 	}
-	taskID, exists := job.tasks[partition]
-	if !exists || taskID != attempt.TaskID {
+	stage := job.stages[stageID]
+	if stage == nil || stage.status != stageRunning || attempt.StageAttemptID != stage.attemptID || partition < 0 || int(partition) >= len(stage.tasks) {
 		return nil
 	}
-	if _, duplicate := job.outputs[partition]; duplicate {
+	if stage.tasks[partition].ID != attempt.TaskID {
+		return nil
+	}
+	if _, duplicate := stage.outputs[partition]; duplicate {
 		return nil
 	}
 	return job
@@ -273,16 +262,33 @@ func (s *DAGScheduler) handleTaskSucceeded(report TaskAttemptSuccess) {
 		s.failJob(report.JobID, err)
 		return
 	}
-	job.outputs[report.PartitionID] = report.Output
-	job.remaining--
-	if job.remaining != 0 {
+	stage := job.stages[report.StageID]
+	runID := job.runID
+	if runID == "" && report.Output.ShuffleOutput != nil {
+		runID = report.Output.ShuffleOutput.Attempt.RunID
+	}
+	if err := report.Output.ValidateFor(TaskExecution{RunID: runID, JobID: report.JobID, Task: stage.tasks[report.PartitionID], Attempt: report.Attempt}); err != nil {
+		s.failJob(report.JobID, fmt.Errorf("invalid stage output: %w", err))
 		return
 	}
-
-	job.status = stageSucceeded
-	result := mergeTaskOutputs(job.action.Kind, job.outputs)
-	s.logger.Info("stage_succeeded", "job_id", report.JobID, "stage_id", job.stageID,
-		"stage_attempt_id", job.stageAttemptID, "partition_count", len(job.tasks))
+	if stage.stage.Kind == StageShuffleMap {
+		job.runID = runID
+	}
+	stage.outputs[report.PartitionID] = report.Output.Clone()
+	stage.remaining--
+	if stage.remaining != 0 {
+		return
+	}
+	stage.status = stageSucceeded
+	s.logger.Info("stage_succeeded", "job_id", report.JobID, "stage_id", report.StageID,
+		"stage_attempt_id", stage.attemptID, "partition_count", len(stage.tasks))
+	if report.StageID != job.resultStageID {
+		if err := s.startReadyStages(report.JobID, job); err != nil {
+			s.failJob(report.JobID, err)
+		}
+		return
+	}
+	result := mergeTaskOutputs(job.action.Kind, stage.outputs)
 	s.logger.Info("job_succeeded", "job_id", report.JobID, "action", job.action.Kind,
 		"count", result.Count, "record_count", len(result.Records))
 	job.cancel()
@@ -295,8 +301,7 @@ func (s *DAGScheduler) failJob(jobID plan.JobID, err error) {
 	if !ok {
 		return
 	}
-	s.logger.Error("job_failed", "job_id", jobID, "stage_id", job.stageID,
-		"stage_attempt_id", job.stageAttemptID, "action", job.action.Kind, "error", err)
+	s.logger.Error("job_failed", "job_id", jobID, "action", job.action.Kind, "error", err)
 	job.cancel()
 	job.response <- jobCompletion{err: err}
 	delete(s.jobs, jobID)
