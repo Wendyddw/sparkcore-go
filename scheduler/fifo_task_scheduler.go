@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wendyddw/sparkcore-go/plan"
+	"github.com/Wendyddw/sparkcore-go/shuffle"
 )
 
 // ErrTaskSchedulerClosed indicates that no more placement or reports are accepted.
@@ -24,10 +25,11 @@ var (
 
 // TaskAssignment carries one physical assignment with its enclosing job identity.
 type TaskAssignment struct {
-	RunID   string
-	JobID   plan.JobID
-	StageID plan.StageID
-	Attempt TaskAttempt
+	ShuffleInputs *shuffle.InputSnapshot
+	RunID         string
+	JobID         plan.JobID
+	StageID       plan.StageID
+	Attempt       TaskAttempt
 }
 
 type taskSetKey struct {
@@ -42,6 +44,7 @@ type logicalTaskState struct {
 	output TaskOutput
 }
 type fifoTaskSet struct {
+	inputs    *shuffle.InputSnapshot
 	key       taskSetKey
 	sequence  uint64
 	ctx       context.Context
@@ -178,6 +181,12 @@ func prepareTaskSet(ctx context.Context, input TaskSet) (*fifoTaskSet, error) {
 		return nil, fmt.Errorf("task set has no tasks")
 	}
 	set := &fifoTaskSet{key: taskSetKey{input.JobID, input.StageID, input.StageAttemptID}, ctx: ctx, remaining: len(input.Tasks), wake: make(chan struct{}, 1)}
+	if input.ShuffleInputs != nil {
+		if err := input.ShuffleInputs.Validate(); err != nil {
+			return nil, err
+		}
+		set.inputs = shuffle.CloneInput(input.ShuffleInputs)
+	}
 	ids := make(map[plan.TaskID]bool)
 	partitions := make(map[plan.PartitionID]bool)
 	for _, task := range input.Tasks {
@@ -255,10 +264,12 @@ func (s *FIFOTaskScheduler) OfferResources(id plan.WorkerID, free int, running [
 			task.state = TaskRunning
 			task.active = identity.ID
 			assignment := TaskAssignment{RunID: s.runID, JobID: set.key.job, StageID: set.key.stage, Attempt: TaskAttempt{Identity: identity, Task: cloneTask(task.task), WorkerID: id, State: TaskRunning}}
+			assignment.ShuffleInputs = shuffle.CloneInput(set.inputs)
 			s.attempts[identity.ID] = &assignedAttempt{assignment: assignment, set: set, task: task}
 			worker.reserved[identity.ID] = struct{}{}
 			// The returned pipeline must not alias scheduler-owned metadata.
 			assignment.Attempt.Task = cloneTask(assignment.Attempt.Task)
+			assignment.ShuffleInputs = shuffle.CloneInput(assignment.ShuffleInputs)
 			assignments = append(assignments, assignment)
 			available--
 		}
@@ -276,6 +287,10 @@ func (s *FIFOTaskScheduler) ReportSuccess(report TaskAttemptSuccess) error {
 	if err != nil || attempt == nil {
 		return err
 	}
+	a := attempt.assignment
+	if err := report.Output.ValidateFor(TaskExecution{RunID: a.RunID, JobID: a.JobID, Task: a.Attempt.Task, Attempt: a.Attempt.Identity}); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidTaskReport, err)
+	}
 	s.release(attempt, TaskSucceeded)
 	if attempt.set.terminal {
 		return nil
@@ -284,9 +299,8 @@ func (s *FIFOTaskScheduler) ReportSuccess(report TaskAttemptSuccess) error {
 		s.finish(attempt.set, err)
 		return nil
 	}
-	report.Output.Records = append([]any(nil), report.Output.Records...)
-	attempt.task.output = report.Output
-	attempt.task.output.Records = append([]any(nil), report.Output.Records...)
+	report.Output = report.Output.Clone()
+	attempt.task.output = report.Output.Clone()
 	attempt.set.remaining--
 	attempt.set.reports = append(attempt.set.reports, terminalReport{success: &report})
 	if attempt.set.remaining == 0 {
@@ -307,6 +321,17 @@ func (s *FIFOTaskScheduler) ReportFailure(report TaskAttemptFailure) error {
 	attempt, err := s.validateReport(report.JobID, report.StageID, report.Attempt, report.PartitionID, report.WorkerID)
 	if err != nil || attempt == nil {
 		return err
+	}
+	if err := ValidateFailure(report.Kind, report.ShuffleInput); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidTaskReport, err)
+	}
+	if report.ShuffleInput != nil {
+		ref := *report.ShuffleInput
+		inputs := attempt.assignment.ShuffleInputs
+		if inputs == nil || ref.PartitionID != attempt.assignment.Attempt.Task.PartitionID || int(ref.Attempt.MapPartitionID) >= len(inputs.Outputs) || inputs.Outputs[ref.Attempt.MapPartitionID].Attempt != ref.Attempt {
+			return fmt.Errorf("%w: failure does not identify an assigned shuffle input", ErrInvalidTaskReport)
+		}
+		report.ShuffleInput = &ref
 	}
 	s.release(attempt, TaskFailed)
 	if attempt.set.terminal {

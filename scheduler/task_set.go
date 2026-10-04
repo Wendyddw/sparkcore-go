@@ -4,14 +4,16 @@ import (
 	"context"
 
 	"github.com/Wendyddw/sparkcore-go/plan"
+	"github.com/Wendyddw/sparkcore-go/shuffle"
 )
 
 // TaskSet contains the logical partition tasks for one stage attempt.
 type TaskSet struct {
-	JobID          plan.JobID          `json:"job_id"`
-	StageID        plan.StageID        `json:"stage_id"`
-	StageAttemptID plan.StageAttemptID `json:"stage_attempt_id"`
-	Tasks          []Task              `json:"tasks"`
+	ShuffleInputs  *shuffle.InputSnapshot `json:"shuffle_inputs,omitempty"`
+	JobID          plan.JobID             `json:"job_id"`
+	StageID        plan.StageID           `json:"stage_id"`
+	StageAttemptID plan.StageAttemptID    `json:"stage_attempt_id"`
+	Tasks          []Task                 `json:"tasks"`
 }
 
 // TaskSetObserver receives terminal attempt reports. Implementations must be

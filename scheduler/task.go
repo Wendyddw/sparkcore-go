@@ -62,12 +62,14 @@ type TaskAttemptSuccess struct {
 
 // TaskAttemptFailure reports a terminal error from one physical attempt.
 type TaskAttemptFailure struct {
-	JobID       plan.JobID          `json:"job_id"`
-	StageID     plan.StageID        `json:"stage_id"`
-	Attempt     TaskAttemptIdentity `json:"attempt"`
-	PartitionID plan.PartitionID    `json:"partition_id"`
-	WorkerID    plan.WorkerID       `json:"worker_id"`
-	Error       string              `json:"error"`
+	Kind         FailureKind             `json:"kind"`
+	ShuffleInput *shuffle.InputReference `json:"shuffle_input,omitempty"`
+	JobID        plan.JobID              `json:"job_id"`
+	StageID      plan.StageID            `json:"stage_id"`
+	Attempt      TaskAttemptIdentity     `json:"attempt"`
+	PartitionID  plan.PartitionID        `json:"partition_id"`
+	WorkerID     plan.WorkerID           `json:"worker_id"`
+	Error        string                  `json:"error"`
 }
 
 // TaskExecution supplies physical identity without changing the logical Task.
