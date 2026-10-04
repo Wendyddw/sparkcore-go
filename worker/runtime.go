@@ -184,7 +184,7 @@ func (w *Runtime) poll(ctx context.Context, state *runtimeState) ([]protocol.Tas
 	if err != nil {
 		return nil, fmt.Errorf("worker heartbeat: %w", err)
 	}
-	if err := validateAssignments(response, offer, state.active, state.seen); err != nil {
+	if err := validateAssignments(response, offer, state.seen); err != nil {
 		return nil, err
 	}
 	return response.Assignments, nil
@@ -209,7 +209,7 @@ func (w *Runtime) dispatch(ctx context.Context, stop context.CancelCauseFunc, st
 	}
 }
 
-func validateAssignments(response protocol.HeartbeatResponse, offer protocol.HeartbeatRequest, active map[plan.TaskAttemptID]protocol.TaskAssignment, seen map[plan.TaskAttemptID]bool) error {
+func validateAssignments(response protocol.HeartbeatResponse, offer protocol.HeartbeatRequest, seen map[plan.TaskAttemptID]bool) error {
 	if err := response.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidResponse, err)
 	}
@@ -220,11 +220,8 @@ func validateAssignments(response protocol.HeartbeatResponse, offer protocol.Hea
 		if a.WorkerID != offer.WorkerID || seen[a.Attempt.ID] {
 			return fmt.Errorf("%w: foreign or reused attempt %d", ErrInvalidResponse, a.Attempt.ID)
 		}
-		for _, running := range active {
-			if running.JobID == a.JobID && running.StageID == a.StageID && running.Attempt.StageAttemptID == a.Attempt.StageAttemptID && running.Attempt.TaskID == a.Attempt.TaskID {
-				return fmt.Errorf("%w: task %d is already active", ErrInvalidResponse, a.Attempt.TaskID)
-			}
-		}
+		// FIFO may assign a fresh retry while the old attempt awaits its report
+		// acknowledgment. Capacity and deduplication are per physical attempt.
 	}
 	return nil
 }
