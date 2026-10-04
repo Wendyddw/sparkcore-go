@@ -8,6 +8,7 @@ import (
 
 	"github.com/Wendyddw/sparkcore-go/plan"
 	"github.com/Wendyddw/sparkcore-go/scheduler"
+	"github.com/Wendyddw/sparkcore-go/shuffle"
 )
 
 const localWorkerID plan.WorkerID = "local"
@@ -55,9 +56,12 @@ func (s *LocalTaskScheduler) ScheduleTaskSet(
 			defer attempts.Done()
 			output, err := s.runner.RunTask(ctx, scheduler.TaskExecution{
 				RunID: s.runID, JobID: taskSet.JobID, Task: task, Attempt: identity, WorkerID: localWorkerID,
+				ShuffleInputs: shuffle.CloneInput(taskSet.ShuffleInputs),
 			})
 			if err != nil {
+				kind, input := scheduler.ClassifyFailure(ctx, err)
 				observer.TaskFailed(scheduler.TaskAttemptFailure{
+					Kind: kind, ShuffleInput: input,
 					JobID:       taskSet.JobID,
 					StageID:     taskSet.StageID,
 					Attempt:     identity,

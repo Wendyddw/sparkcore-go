@@ -130,7 +130,10 @@ func (r *LocalRunner) RunTask(ctx context.Context, execution scheduler.TaskExecu
 	if err := context.Cause(ctx); err != nil {
 		return scheduler.TaskOutput{}, err
 	}
-	records := make([]any, len(result.records))
+	var records []any
+	if execution.Task.FinalAction.Kind == scheduler.ActionCollect {
+		records = make([]any, len(result.records))
+	}
 	for i, record := range result.records {
 		records[i] = record
 	}

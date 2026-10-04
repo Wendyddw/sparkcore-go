@@ -13,6 +13,7 @@ import (
 	"github.com/Wendyddw/sparkcore-go/plan"
 	"github.com/Wendyddw/sparkcore-go/protocol"
 	"github.com/Wendyddw/sparkcore-go/scheduler"
+	"github.com/Wendyddw/sparkcore-go/shuffle"
 )
 
 // CoordinatorClient methods must support concurrent calls and context cancellation.
@@ -29,6 +30,7 @@ var _ CoordinatorClient = (*Client)(nil)
 // RegisterFunctions initializes a fresh worker-owned registry before Run.
 // Sources defaults to TextSourceReader; source reads begin only during execution.
 type RuntimeConfig struct {
+	ShuffleStore      shuffle.Store // Caller owns the store and keeps it open through Run.
 	WorkerID          plan.WorkerID
 	Slots             int
 	HeartbeatInterval time.Duration
@@ -75,7 +77,7 @@ func NewRuntime(client CoordinatorClient, config RuntimeConfig) (*Runtime, error
 		logger = slog.New(slog.DiscardHandler)
 	}
 	return &Runtime{logger: logger.With("component", "worker", "worker_id", config.WorkerID),
-		client: client, config: config, runner: executor.NewLocalRunner(registry, config.Sources, config.Slots)}, nil
+		client: client, config: config, runner: executor.NewLocalRunner(registry, config.Sources, config.Slots, executor.WithShuffleStore(config.ShuffleStore))}, nil
 }
 
 // runtimeState belongs to one Run call. Only the event loop mutates its maps;

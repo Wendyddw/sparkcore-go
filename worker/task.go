@@ -19,10 +19,18 @@ func (w *Runtime) executeAndReport(ctx context.Context, assignment protocol.Task
 		logger.Info("task_finished", "execution_succeeded", taskErr == nil,
 			"report_acknowledged", reportErr == nil, "task_error", taskErr, "report_error", reportErr)
 	}()
-	result, taskErr := w.runner.RunTask(ctx, assignment.Execution())
+	execution := assignment.Execution()
+	result, taskErr := w.runner.RunTask(ctx, execution)
+	ranSuccessfully := taskErr == nil
 	var output protocol.TaskOutput
 	if taskErr == nil {
-		output, taskErr = encodeOutput(assignment.Task.FinalAction.Kind, result)
+		if taskErr = result.ValidateFor(execution); taskErr == nil {
+			if assignment.Task.StageKind == scheduler.StageShuffleMap {
+				output = protocol.TaskOutput{ShuffleOutput: result.Clone().ShuffleOutput}
+			} else {
+				output, taskErr = encodeOutput(assignment.Task.FinalAction.Kind, result)
+			}
+		}
 	}
 	if taskErr == nil && ctx.Err() != nil {
 		taskErr = ctx.Err()
@@ -33,7 +41,12 @@ func (w *Runtime) executeAndReport(ctx context.Context, assignment protocol.Task
 	var ack protocol.TaskReportResponse
 	var err error
 	if taskErr != nil {
+		kind, input := scheduler.ClassifyFailure(ctx, taskErr)
+		if ranSuccessfully && kind != scheduler.FailureCanceled {
+			kind, input = scheduler.FailurePermanent, nil
+		}
 		ack, err = w.client.ReportFailure(reportCtx, protocol.TaskFailureRequest{
+			Kind: kind, ShuffleInput: input,
 			JobID: assignment.JobID, StageID: assignment.StageID, WorkerID: assignment.WorkerID,
 			Attempt: assignment.Attempt, PartitionID: assignment.Task.PartitionID, Error: taskErr.Error(),
 		})
