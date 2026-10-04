@@ -58,7 +58,7 @@ func reduceRecords(ctx context.Context, input Iterator, fn ReduceFunc) ([]Record
 		}
 		pair, ok := record.(KeyValue)
 		if !ok {
-			return nil, fmt.Errorf("reduce-by-key expected KeyValue, got %T", record)
+			return nil, permanentErrorf("reduce-by-key expected KeyValue, got %T", record)
 		}
 		value := pair.Value
 		if previous, exists := values[pair.Key]; exists {

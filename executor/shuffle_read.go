@@ -3,7 +3,6 @@ package executor
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 
 	"github.com/Wendyddw/sparkcore-go/plan"
@@ -16,39 +15,39 @@ func validateShuffleExecution(e scheduler.TaskExecution, store shuffle.Store) er
 	for index, operation := range e.Task.Operations {
 		if operation.Kind == scheduler.StageOperationShuffleRead {
 			if index != 0 || operation.ShuffleRead == nil || operation.RDD != nil {
-				return fmt.Errorf("shuffle read must be the first operation with a read specification")
+				return permanentErrorf("shuffle read must be the first operation with a read specification")
 			}
 			read = operation.ShuffleRead
 		}
 		if operation.RDD != nil && operation.RDD.Operator.Kind == plan.OpReduceByKey && (read == nil || index != 1) {
-			return fmt.Errorf("reduce-by-key must immediately follow shuffle read")
+			return permanentErrorf("reduce-by-key must immediately follow shuffle read")
 		}
 	}
 	if read == nil {
 		if e.ShuffleInputs != nil {
-			return fmt.Errorf("task without shuffle read must not have shuffle inputs")
+			return permanentErrorf("task without shuffle read must not have shuffle inputs")
 		}
 		return nil
 	}
 	task := e.Task
 	if task.StageKind != scheduler.StageResult || task.ShuffleWrite != nil || task.FinalAction == nil {
-		return fmt.Errorf("shuffle read requires a result task")
+		return permanentErrorf("shuffle read requires a result task")
 	}
 	if len(task.Operations) < 2 || task.Operations[1].Kind != scheduler.StageOperationRDD || task.Operations[1].RDD == nil || task.Operations[1].RDD.Operator.Kind != plan.OpReduceByKey {
-		return fmt.Errorf("shuffle read must be followed by reduce-by-key")
+		return permanentErrorf("shuffle read must be followed by reduce-by-key")
 	}
 	if store == nil || e.ShuffleInputs == nil {
-		return fmt.Errorf("shuffle read requires a store and input snapshot")
+		return permanentErrorf("shuffle read requires a store and input snapshot")
 	}
 	if err := e.ShuffleInputs.Validate(); err != nil {
 		return err
 	}
 	inputs := e.ShuffleInputs
 	if inputs.RunID != e.RunID || inputs.JobID != e.JobID || inputs.ShuffleID != read.ShuffleID {
-		return fmt.Errorf("shuffle input does not match task run, job or shuffle")
+		return permanentErrorf("shuffle input does not match task run, job or shuffle")
 	}
 	if read.Partitioner.Kind != plan.PartitionerHash || read.Partitioner.NumPartitions != inputs.NumReducePartitions || task.NumPartitions != inputs.NumReducePartitions || task.PartitionID < 0 || int(task.PartitionID) >= task.NumPartitions {
-		return fmt.Errorf("shuffle input does not match task partitioning")
+		return permanentErrorf("shuffle input does not match task partitioning")
 	}
 	return nil
 }

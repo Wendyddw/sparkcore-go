@@ -2,7 +2,6 @@ package executor
 
 import (
 	"context"
-	"fmt"
 	"io"
 )
 
@@ -105,7 +104,7 @@ func (i *valueMapIterator) Next(ctx context.Context) (Record, bool, error) {
 	}
 	pair, ok := record.(KeyValue)
 	if !ok {
-		return nil, false, fmt.Errorf("map-values expected KeyValue, got %T", record)
+		return nil, false, permanentErrorf("map-values expected KeyValue, got %T", record)
 	}
 	value, err := i.fn(pair.Value)
 	if err != nil {

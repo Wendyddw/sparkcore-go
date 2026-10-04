@@ -30,7 +30,7 @@ func (TextSourceReader) Open(
 		return nil, err
 	}
 	if numPartitions <= 0 || partition < 0 || int(partition) >= numPartitions {
-		return nil, fmt.Errorf("invalid partition %d of %d", partition, numPartitions)
+		return nil, permanentErrorf("invalid partition %d of %d", partition, numPartitions)
 	}
 
 	file, err := os.Open(path)

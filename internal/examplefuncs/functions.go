@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Wendyddw/sparkcore-go/executor"
+	"github.com/Wendyddw/sparkcore-go/scheduler"
 )
 
 // Register adds every named function referenced by the example job files.
@@ -23,7 +24,7 @@ func Register(registry *executor.FunctionRegistry) error {
 			return registry.RegisterMap("normalize", func(record executor.Record) (executor.Record, error) {
 				value, ok := record.(string)
 				if !ok {
-					return nil, fmt.Errorf("normalize expected string, got %T", record)
+					return nil, scheduler.PermanentFailure(fmt.Errorf("normalize expected string, got %T", record))
 				}
 				return strings.TrimSpace(value), nil
 			})
@@ -32,7 +33,7 @@ func Register(registry *executor.FunctionRegistry) error {
 			return registry.RegisterFilter("non_empty", func(record executor.Record) (bool, error) {
 				value, ok := record.(string)
 				if !ok {
-					return false, fmt.Errorf("non_empty expected string, got %T", record)
+					return false, scheduler.PermanentFailure(fmt.Errorf("non_empty expected string, got %T", record))
 				}
 				return value != "", nil
 			})
@@ -41,7 +42,7 @@ func Register(registry *executor.FunctionRegistry) error {
 			return registry.RegisterPairMap("word_pair", func(record executor.Record) (executor.KeyValue, error) {
 				word, ok := record.(string)
 				if !ok {
-					return executor.KeyValue{}, fmt.Errorf("word_pair expected string, got %T", record)
+					return executor.KeyValue{}, scheduler.PermanentFailure(fmt.Errorf("word_pair expected string, got %T", record))
 				}
 				return executor.KeyValue{Key: word, Value: 1}, nil
 			})
@@ -57,7 +58,7 @@ func Register(registry *executor.FunctionRegistry) error {
 					return nil, err
 				}
 				if (rightValue > 0 && leftValue > math.MaxInt64-rightValue) || (rightValue < 0 && leftValue < math.MinInt64-rightValue) {
-					return nil, fmt.Errorf("sum_int overflow")
+					return nil, scheduler.PermanentFailure(fmt.Errorf("sum_int overflow"))
 				}
 				return leftValue + rightValue, nil
 			})
@@ -79,14 +80,14 @@ func integerValue(value executor.Record) (int64, error) {
 		return number, nil
 	case json.Number:
 		if !json.Valid([]byte(number)) {
-			return 0, fmt.Errorf("sum_int invalid JSON number %q", number)
+			return 0, scheduler.PermanentFailure(fmt.Errorf("sum_int invalid JSON number %q", number))
 		}
 		integer, err := number.Int64()
 		if err != nil {
-			return 0, fmt.Errorf("sum_int expected signed int64: %w", err)
+			return 0, scheduler.PermanentFailure(fmt.Errorf("sum_int expected signed int64: %w", err))
 		}
 		return integer, nil
 	default:
-		return 0, fmt.Errorf("sum_int expected int, int64 or integer json.Number, got %T", value)
+		return 0, scheduler.PermanentFailure(fmt.Errorf("sum_int expected int, int64 or integer json.Number, got %T", value))
 	}
 }

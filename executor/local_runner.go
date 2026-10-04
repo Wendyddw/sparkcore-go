@@ -3,7 +3,6 @@ package executor
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/Wendyddw/sparkcore-go/scheduler"
 	"github.com/Wendyddw/sparkcore-go/shuffle"
@@ -60,10 +59,10 @@ type partitionResult struct {
 func (r *LocalRunner) runTask(ctx context.Context, execution scheduler.TaskExecution) (result partitionResult, err error) {
 	task := execution.Task
 	if task.StageKind != scheduler.StageResult || task.FinalAction == nil {
-		return partitionResult{}, fmt.Errorf("result task requires a result stage and final action")
+		return partitionResult{}, permanentErrorf("result task requires a result stage and final action")
 	}
 	if task.ShuffleWrite != nil {
-		return partitionResult{}, fmt.Errorf("result task must not have a shuffle write")
+		return partitionResult{}, permanentErrorf("result task must not have a shuffle write")
 	}
 
 	iterator, err := buildTaskIterator(ctx, execution, r.registry, r.sources, r.shuffleStore)
@@ -85,7 +84,7 @@ func (r *LocalRunner) runTask(ctx context.Context, execution scheduler.TaskExecu
 		case scheduler.ActionCount:
 			result.count++
 		default:
-			return partitionResult{}, fmt.Errorf("unsupported action %q", task.FinalAction.Kind)
+			return partitionResult{}, permanentErrorf("unsupported action %q", task.FinalAction.Kind)
 		}
 	}
 }
@@ -93,22 +92,22 @@ func (r *LocalRunner) runTask(ctx context.Context, execution scheduler.TaskExecu
 // RunTask executes one attempt while respecting the runner's concurrency limit.
 func (r *LocalRunner) RunTask(ctx context.Context, execution scheduler.TaskExecution) (scheduler.TaskOutput, error) {
 	if ctx == nil {
-		return scheduler.TaskOutput{}, fmt.Errorf("task context is nil")
+		return scheduler.TaskOutput{}, permanentErrorf("task context is nil")
 	}
 	if err := execution.Validate(); err != nil {
-		return scheduler.TaskOutput{}, err
+		return scheduler.TaskOutput{}, scheduler.PermanentFailure(err)
 	}
 	if r == nil || r.registry == nil {
-		return scheduler.TaskOutput{}, fmt.Errorf("local runner function registry is nil")
+		return scheduler.TaskOutput{}, permanentErrorf("local runner function registry is nil")
 	}
 	if r.sources == nil {
-		return scheduler.TaskOutput{}, fmt.Errorf("local runner source reader is nil")
+		return scheduler.TaskOutput{}, permanentErrorf("local runner source reader is nil")
 	}
 	if r.maxConcurrency <= 0 || r.permits == nil {
-		return scheduler.TaskOutput{}, fmt.Errorf("local runner concurrency must be positive")
+		return scheduler.TaskOutput{}, permanentErrorf("local runner concurrency must be positive")
 	}
 	if err := validateShuffleExecution(execution, r.shuffleStore); err != nil {
-		return scheduler.TaskOutput{}, err
+		return scheduler.TaskOutput{}, scheduler.PermanentFailure(err)
 	}
 	select {
 	case r.permits <- struct{}{}:

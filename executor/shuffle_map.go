@@ -15,16 +15,16 @@ func (r *LocalRunner) runShuffleMap(ctx context.Context, execution scheduler.Tas
 	task := execution.Task
 	write := task.ShuffleWrite
 	if write == nil || task.FinalAction != nil {
-		return output, fmt.Errorf("shuffle-map task requires a shuffle write and no final action")
+		return output, permanentErrorf("shuffle-map task requires a shuffle write and no final action")
 	}
 	if task.NumPartitions <= 0 || task.PartitionID < 0 || int(task.PartitionID) >= task.NumPartitions {
-		return output, fmt.Errorf("invalid map partition %d of %d", task.PartitionID, task.NumPartitions)
+		return output, permanentErrorf("invalid map partition %d of %d", task.PartitionID, task.NumPartitions)
 	}
 	if write.Partitioner.Kind != plan.PartitionerHash || write.Partitioner.NumPartitions <= 0 {
-		return output, fmt.Errorf("shuffle write requires a hash partitioner with positive partitions")
+		return output, permanentErrorf("shuffle write requires a hash partitioner with positive partitions")
 	}
 	if r.shuffleStore == nil {
-		return output, fmt.Errorf("shuffle store is not configured")
+		return output, permanentErrorf("shuffle store is not configured")
 	}
 	var reduce ReduceFunc
 	if write.MapSideCombine {
@@ -92,7 +92,7 @@ func writeShuffleRecords(ctx context.Context, iterator Iterator, writer shuffle.
 		}
 		pair, ok := record.(KeyValue)
 		if !ok {
-			return fmt.Errorf("shuffle write expected KeyValue, got %T", record)
+			return permanentErrorf("shuffle write expected KeyValue, got %T", record)
 		}
 		if reduce == nil {
 			if err := writer.Write(shuffle.Record{Key: pair.Key, Value: pair.Value}); err != nil {

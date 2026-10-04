@@ -3,7 +3,6 @@ package executor
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/Wendyddw/sparkcore-go/plan"
 	"github.com/Wendyddw/sparkcore-go/scheduler"
@@ -30,14 +29,14 @@ func buildTaskIterator(
 			continue
 		}
 		if operation.Kind != scheduler.StageOperationRDD || operation.RDD == nil {
-			return nil, fmt.Errorf("invalid stage operation %q", operation.Kind)
+			return nil, permanentErrorf("invalid stage operation %q", operation.Kind)
 		}
 
 		operator := operation.RDD.Operator
 		switch operator.Kind {
 		case plan.OpSource:
 			if iterator != nil {
-				return nil, fmt.Errorf("source must be the first pipeline operation")
+				return nil, permanentErrorf("source must be the first pipeline operation")
 			}
 			var err error
 			iterator, err = sources.Open(ctx, operator.SourcePath, task.PartitionID, task.NumPartitions)
@@ -45,11 +44,11 @@ func buildTaskIterator(
 				return nil, err
 			}
 			if iterator == nil {
-				return nil, fmt.Errorf("source reader returned a nil iterator")
+				return nil, permanentErrorf("source reader returned a nil iterator")
 			}
 		case plan.OpMap:
 			if iterator == nil {
-				return nil, fmt.Errorf("operator %q has no input iterator", operator.Kind)
+				return nil, permanentErrorf("operator %q has no input iterator", operator.Kind)
 			}
 			fn, err := registry.Map(operator.FunctionID)
 			if err != nil {
@@ -58,7 +57,7 @@ func buildTaskIterator(
 			iterator = &mapIterator{input: iterator, fn: fn}
 		case plan.OpFilter:
 			if iterator == nil {
-				return nil, fmt.Errorf("operator %q has no input iterator", operator.Kind)
+				return nil, permanentErrorf("operator %q has no input iterator", operator.Kind)
 			}
 			fn, err := registry.Filter(operator.FunctionID)
 			if err != nil {
@@ -67,7 +66,7 @@ func buildTaskIterator(
 			iterator = &filterIterator{input: iterator, fn: fn}
 		case plan.OpMapToPair:
 			if iterator == nil {
-				return nil, fmt.Errorf("operator %q has no input iterator", operator.Kind)
+				return nil, permanentErrorf("operator %q has no input iterator", operator.Kind)
 			}
 			fn, err := registry.PairMap(operator.FunctionID)
 			if err != nil {
@@ -76,7 +75,7 @@ func buildTaskIterator(
 			iterator = &pairMapIterator{input: iterator, fn: fn}
 		case plan.OpMapValues:
 			if iterator == nil {
-				return nil, fmt.Errorf("operator %q has no input iterator", operator.Kind)
+				return nil, permanentErrorf("operator %q has no input iterator", operator.Kind)
 			}
 			fn, err := registry.ValueMap(operator.FunctionID)
 			if err != nil {
@@ -85,7 +84,7 @@ func buildTaskIterator(
 			iterator = &valueMapIterator{input: iterator, fn: fn}
 		case plan.OpReduceByKey:
 			if iterator == nil {
-				return nil, fmt.Errorf("reduce-by-key has no input iterator")
+				return nil, permanentErrorf("reduce-by-key has no input iterator")
 			}
 			fn, err := registry.Reduce(operator.FunctionID)
 			if err != nil {
@@ -93,11 +92,11 @@ func buildTaskIterator(
 			}
 			iterator = &reduceIterator{input: iterator, fn: fn}
 		default:
-			return nil, fmt.Errorf("operator %q is not supported by the executor", operator.Kind)
+			return nil, permanentErrorf("operator %q is not supported by the executor", operator.Kind)
 		}
 	}
 	if iterator == nil {
-		return nil, fmt.Errorf("task has no operations")
+		return nil, permanentErrorf("task has no operations")
 	}
 	return iterator, nil
 }

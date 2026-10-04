@@ -11,6 +11,20 @@ import (
 
 type FailureKind string
 
+type permanentError struct{ err error }
+
+func (e *permanentError) Error() string { return e.err.Error() }
+func (e *permanentError) Unwrap() error { return e.err }
+
+// PermanentFailure marks an error that re-executing the task cannot fix.
+// It preserves the cause for errors.Is/As and returns nil for a nil error.
+func PermanentFailure(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &permanentError{err: err}
+}
+
 const (
 	FailureExecution    FailureKind = "execution"
 	FailurePermanent    FailureKind = "permanent"
@@ -45,7 +59,8 @@ func ClassifyFailure(ctx context.Context, err error) (FailureKind, *shuffle.Inpu
 	if errors.As(err, &input) {
 		return FailureShuffleInput, &shuffle.InputReference{Attempt: input.Attempt, PartitionID: input.PartitionID}
 	}
-	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) || errors.Is(err, shuffle.ErrInvalidRecord) || errors.Is(err, shuffle.ErrRecordTooLarge) {
+	var permanent *permanentError
+	if errors.As(err, &permanent) || errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) || errors.Is(err, shuffle.ErrInvalidRecord) || errors.Is(err, shuffle.ErrRecordTooLarge) {
 		return FailurePermanent, nil
 	}
 	return FailureExecution, nil

@@ -242,5 +242,5 @@ func duplicateFunctionError(kind, id string) error {
 }
 
 func unknownFunctionError(kind, id string) error {
-	return fmt.Errorf("%s function %q is not registered", kind, id)
+	return permanentErrorf("%s function %q is not registered", kind, id)
 }
