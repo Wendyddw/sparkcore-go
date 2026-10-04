@@ -28,7 +28,7 @@ func NewLocalTaskScheduler(runner scheduler.TaskRunner) *LocalTaskScheduler {
 }
 
 // ScheduleTaskSet assigns one local attempt to every logical task and waits
-// until all runner calls have exited.
+// until all runner calls have exited. Local mode does not retry failed tasks.
 func (s *LocalTaskScheduler) ScheduleTaskSet(
 	ctx context.Context,
 	taskSet scheduler.TaskSet,

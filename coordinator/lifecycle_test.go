@@ -140,6 +140,7 @@ func TestLifecycleLogsDoNotReviveFailedJobs(t *testing.T) {
 				assigned = awaitAssignments(t, h, "a", 2)
 				if reason == "worker failure" {
 					r := failureReport(successReport(assigned[0], protocol.TaskOutput{}))
+					r.Kind = scheduler.FailurePermanent
 					acknowledge(t, h, r)
 					acknowledge(t, h, r)
 				} else {

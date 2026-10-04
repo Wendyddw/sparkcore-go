@@ -165,6 +165,7 @@ func TestFailureReportsTerminateSetAndRetainSiblingReservations(t *testing.T) {
 	run := startReportRun(t, tasks, 3, scheduler.ActionCount)
 	assigned := awaitAssignments(t, server.Handler, "a", 2)
 	failure := failureReport(successReport(assigned[0], protocol.TaskOutput{}))
+	failure.Kind = scheduler.FailurePermanent
 	acknowledge(t, server.Handler, failure)
 	if err := run.wait(t); err == nil || !strings.Contains(err.Error(), failure.Error) {
 		t.Fatalf("task-set failure = %v", err)
@@ -183,7 +184,7 @@ func TestFailureReportsTerminateSetAndRetainSiblingReservations(t *testing.T) {
 		t.Fatalf("callbacks: successes=%d failures=%d", len(run.successes), len(run.failures))
 	}
 	got := <-run.failures
-	want := scheduler.TaskAttemptFailure{Kind: scheduler.FailureExecution, JobID: failure.JobID, StageID: failure.StageID, Attempt: failure.Attempt,
+	want := scheduler.TaskAttemptFailure{Kind: scheduler.FailurePermanent, JobID: failure.JobID, StageID: failure.StageID, Attempt: failure.Attempt,
 		PartitionID: failure.PartitionID, WorkerID: failure.WorkerID, Error: failure.Error}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("failure = %#v, want %#v", got, want)
@@ -312,7 +313,9 @@ func TestConcurrentReportsAndHeartbeatsReleaseReservationsOnce(t *testing.T) {
 			success := successReport(assigned, protocol.TaskOutput{Count: 7})
 			var report any = success
 			if failure {
-				report = failureReport(success)
+				r := failureReport(success)
+				r.Kind = scheduler.FailurePermanent
+				report = r
 			}
 			var wg sync.WaitGroup
 			for range 32 {

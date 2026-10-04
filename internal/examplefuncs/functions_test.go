@@ -1,11 +1,13 @@
 package examplefuncs
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"testing"
 
 	"github.com/Wendyddw/sparkcore-go/executor"
+	"github.com/Wendyddw/sparkcore-go/scheduler"
 )
 
 func TestSumIntExactNumbersAndOverflow(t *testing.T) {
@@ -43,6 +45,8 @@ func TestSumIntExactNumbersAndOverflow(t *testing.T) {
 	for _, operands := range [][2]int64{{math.MaxInt64, 1}, {math.MinInt64, -1}} {
 		if _, err := sum(operands[0], operands[1]); err == nil {
 			t.Fatalf("accepted overflow: %v", operands)
+		} else if kind, _ := scheduler.ClassifyFailure(context.Background(), err); kind != scheduler.FailurePermanent {
+			t.Fatalf("overflow classified %s", kind)
 		}
 	}
 }

@@ -67,6 +67,8 @@ func TestFailureClassificationPreservesInputIdentity(t *testing.T) {
 	}{
 		{input, FailureShuffleInput}, {fs.ErrNotExist, FailurePermanent}, {shuffle.ErrRecordTooLarge, FailurePermanent},
 		{errors.New("user function failed"), FailureExecution}, {context.Canceled, FailureCanceled},
+		{PermanentFailure(errors.New("invalid configuration")), FailurePermanent},
+		{PermanentFailure(input), FailureShuffleInput}, {PermanentFailure(context.Canceled), FailureCanceled},
 	} {
 		kind, ref := ClassifyFailure(context.Background(), fmt.Errorf("wrapped: %w", test.err))
 		if kind != test.kind {
@@ -83,6 +85,16 @@ func TestFailureClassificationPreservesInputIdentity(t *testing.T) {
 	cancel(errors.New("shutdown"))
 	if kind, ref := ClassifyFailure(ctx, input); kind != FailureCanceled || ref != nil {
 		t.Fatal("cancellation did not take precedence")
+	}
+}
+
+func TestPermanentFailurePreservesCause(t *testing.T) {
+	cause := errors.New("invalid record shape")
+	if err := PermanentFailure(cause); !errors.Is(err, cause) || err.Error() != cause.Error() {
+		t.Fatalf("lost cause: %v", err)
+	}
+	if PermanentFailure(nil) != nil {
+		t.Fatal("nil error became a failure")
 	}
 }
 

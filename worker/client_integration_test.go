@@ -78,7 +78,9 @@ func TestClientCompletesCoordinatorTaskReports(t *testing.T) {
 				var ack protocol.TaskReportResponse
 				var err error
 				if failure {
-					ack, err = client.ReportFailure(ctx, failureRequest(assigned))
+					request := failureRequest(assigned)
+					request.Kind = scheduler.FailurePermanent
+					ack, err = client.ReportFailure(ctx, request)
 				} else {
 					ack, err = client.ReportSuccess(ctx, successRequest(assigned))
 				}

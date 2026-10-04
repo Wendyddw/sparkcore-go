@@ -193,7 +193,7 @@ func assertReserved(t *testing.T, s *FIFOTaskScheduler, id plan.WorkerID, want i
 }
 
 func TestFIFOFailureRetainsSiblingReservationsUntilReports(t *testing.T) {
-	s := NewFIFOTaskScheduler()
+	s := NewFIFOTaskScheduler(WithMaxTaskAttempts(1))
 	defer s.Close()
 	if err := s.RegisterWorker("a", 2); err != nil {
 		t.Fatal(err)

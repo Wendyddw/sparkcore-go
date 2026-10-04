@@ -246,7 +246,9 @@ func TestJobServiceStopsJobsAndIgnoresLateReports(t *testing.T) {
 			assigned := awaitAssignments(t, h, "a", 2)
 			switch reason {
 			case "failure":
-				acknowledge(t, h, failureReport(successReport(assigned[0], protocol.TaskOutput{})))
+				failure := failureReport(successReport(assigned[0], protocol.TaskOutput{}))
+				failure.Kind = scheduler.FailurePermanent
+				acknowledge(t, h, failure)
 			case "cancel":
 				cancel()
 			case "close":
