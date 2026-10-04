@@ -1,13 +1,13 @@
 # SparkCore Go
 
-A Spark-style execution core in Go for exploring lazy computation graphs, stage planning, and distributed task scheduling. It supports local and distributed narrow pipelines with `Count` and `Collect` actions. Shuffle boundaries can be planned and explained; shuffle execution is not implemented yet.
+A Spark-style execution core in Go for exploring lazy computation graphs, stage planning, and distributed task scheduling. It supports narrow pipelines and one-shuffle `ReduceByKey` jobs with `Count` and `Collect` actions. Shuffle execution requires a configured shared filesystem store; the commands currently demonstrate narrow jobs.
 
 ## Architecture
 
 - **API and planning** (`api`, `plan`, `jobspec`): build lazy RDD lineage from Go code or JSON job specifications, then validate and split it into stages.
-- **Scheduling** (`scheduler`): the DAG scheduler owns job and stage completion; the FIFO scheduler assigns the oldest task set's pending partitions in ascending order, within worker capacity.
+- **Scheduling** (`scheduler`): the DAG scheduler waits for every parent map output before dispatching reducers; the FIFO scheduler assigns the oldest task set's pending partitions in ascending order, within worker capacity.
 - **Coordinator** (`coordinator`, `protocol`): exposes HTTP/JSON endpoints for job submission, worker registration, heartbeats, and task reports.
-- **Execution** (`worker`, `executor`): workers poll for assignments and execute each partition's narrow pipeline through `LocalRunner`. Local mode uses the same DAG scheduler with a local scheduling adapter.
+- **Execution** (`worker`, `executor`, `shuffle`): workers poll for tasks and execute narrow pipelines or shuffle writes/reads through `LocalRunner`. Shuffle bytes stay in shared storage; HTTP carries metadata. Local mode uses the same DAG scheduler with a local scheduling adapter.
 
 ```text
 Submitter -> Coordinator -> DAG scheduler -> FIFO scheduler
@@ -57,7 +57,8 @@ go run ./cmd/explain --job examples/reduce_by_key.json
 - Workers must have access to source files. Relative paths resolve from each worker's working directory.
 - The coordinator and workers must register matching function IDs and implementations; arbitrary Go closures are not serialized. The commands register the included example functions.
 - Records must be JSON-compatible, and keys are strings.
-- Shuffle execution, retries, and worker-loss recovery are not implemented.
+- Configure shuffle storage through `executor.WithShuffleStore` or `worker.RuntimeConfig.ShuffleStore`. Command flags are pending. Keep published files until all processes using them stop.
+- Multiple shuffles, disk spilling, retries, and worker-loss recovery are not implemented.
 - Canceling a submission stops pending scheduling; already assigned tasks may finish and report. Workers continue polling until stopped.
 
 ## Development
@@ -69,4 +70,4 @@ go test -race ./...
 go vet ./...
 ```
 
-The [distributed integration tests](integration/distributed_narrow_test.go) exercise HTTP submission through two workers, checking Count/Collect results, worker capacity, unique attempts, stale and duplicate reports, and cleanup.
+The [narrow integration tests](integration/distributed_narrow_test.go) and [shuffle integration tests](integration/dag_shuffle_test.go) exercise HTTP submission through two workers, including stage readiness, Count/Collect results, worker capacity, duplicate reports, and cleanup.
