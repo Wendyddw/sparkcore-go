@@ -20,6 +20,8 @@ Submitter <- merged result <- task reports <- Workers
 
 Results complete after all partitions succeed: `Count` sums partition counts, and `Collect` merges records in partition order. Attempt identities protect accepted results and slot accounting from stale or duplicate reports.
 
+Distributed FIFO scheduling retries execution failures up to three total attempts per task, preserving successful partitions and FIFO priority. Configure the limit with `scheduler.WithMaxTaskAttempts(n)`; one disables retries and nonpositive values panic. Known validation/data errors fail immediately; custom functions can mark these with `scheduler.PermanentFailure(err)`. Local execution remains fail-fast, and HTTP requests are not automatically retried.
+
 ## Run
 
 Requires Go 1.26.5 or a compatible newer toolchain. Run commands from the repository root.
@@ -58,7 +60,7 @@ go run ./cmd/explain --job examples/reduce_by_key.json
 - The coordinator and workers must register matching function IDs and implementations; arbitrary Go closures are not serialized. The commands register the included example functions.
 - Records must be JSON-compatible, and keys are strings.
 - Configure shuffle storage through `executor.WithShuffleStore` or `worker.RuntimeConfig.ShuffleStore`. Command flags are pending. Keep published files until all processes using them stop.
-- Multiple shuffles, disk spilling, retries, and worker-loss recovery are not implemented.
+- Multiple shuffles, disk spilling, worker-loss recovery, and recovery from missing/corrupt shuffle input are not implemented.
 - Canceling a submission stops pending scheduling; already assigned tasks may finish and report. Workers continue polling until stopped.
 
 ## Development
