@@ -38,7 +38,7 @@ func TestDecodeAndValidateRejectsInvalidJSONEnvelopes(t *testing.T) {
 }
 
 func TestDecodeAndValidateRequiresExplicitAttemptIdentityButAllowsZero(t *testing.T) {
-	const valid = `{"job_id":0,"stage_id":0,"attempt":{"id":0,"task_id":0,"stage_attempt_id":0},"partition_id":0,"worker_id":"a","error":"failed"}`
+	const valid = `{"kind":"execution","job_id":0,"stage_id":0,"attempt":{"id":0,"task_id":0,"stage_attempt_id":0},"partition_id":0,"worker_id":"a","error":"failed"}`
 	if _, err := protocol.DecodeAndValidate[protocol.TaskFailureRequest](strings.NewReader(valid), 1024); err != nil {
 		t.Fatal(err)
 	}

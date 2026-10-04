@@ -39,9 +39,9 @@ func TestMessageValidationRejectsInvalidValues(t *testing.T) {
 		{"null assignments", protocol.HeartbeatResponse{}},
 		{"success negative partition", protocol.TaskSuccessRequest{WorkerID: "a", PartitionID: -1}},
 		{"success empty worker", protocol.TaskSuccessRequest{}},
-		{"failure negative partition", protocol.TaskFailureRequest{WorkerID: "a", PartitionID: -1, Error: "failed"}},
-		{"failure empty worker", protocol.TaskFailureRequest{Error: "failed"}},
-		{"blank failure", protocol.TaskFailureRequest{WorkerID: "a", Error: " \n"}},
+		{"failure negative partition", protocol.TaskFailureRequest{Kind: scheduler.FailureExecution, WorkerID: "a", PartitionID: -1, Error: "failed"}},
+		{"failure empty worker", protocol.TaskFailureRequest{Kind: scheduler.FailureExecution, Error: "failed"}},
+		{"blank failure", protocol.TaskFailureRequest{Kind: scheduler.FailureExecution, WorkerID: "a", Error: " \n"}},
 		{"negative count", protocol.TaskOutput{Count: -1}},
 		{"mixed output", protocol.TaskOutput{Count: 1, Records: []json.RawMessage{json.RawMessage(`1`)}}},
 		{"malformed record", protocol.TaskOutput{Records: []json.RawMessage{json.RawMessage(`{`)}}},
@@ -173,7 +173,7 @@ func TestDecodeAndValidateSupportsEveryMessageAndExistingJobFiles(t *testing.T) 
 	assertDecodes(t, protocol.HeartbeatResponse{Assignments: []protocol.TaskAssignment{validAssignment()}})
 	assertDecodes(t, validAssignment())
 	assertDecodes(t, protocol.TaskSuccessRequest{WorkerID: "a", Output: protocol.TaskOutput{Count: 5}})
-	assertDecodes(t, protocol.TaskFailureRequest{WorkerID: "a", Error: "failed"})
+	assertDecodes(t, protocol.TaskFailureRequest{Kind: scheduler.FailureExecution, WorkerID: "a", Error: "failed"})
 	assertDecodes(t, protocol.TaskReportResponse{Acknowledged: true})
 	assertDecodes(t, protocol.JobResultResponse{Action: scheduler.ActionCount, Count: 0})
 	assertDecodes(t, protocol.JobResultResponse{Action: scheduler.ActionCollect, Records: []json.RawMessage{}})

@@ -67,7 +67,7 @@ func successReport(a protocol.TaskAssignment, output protocol.TaskOutput) protoc
 }
 
 func failureReport(r protocol.TaskSuccessRequest) protocol.TaskFailureRequest {
-	return protocol.TaskFailureRequest{JobID: r.JobID, StageID: r.StageID, Attempt: r.Attempt,
+	return protocol.TaskFailureRequest{Kind: scheduler.FailureExecution, JobID: r.JobID, StageID: r.StageID, Attempt: r.Attempt,
 		PartitionID: r.PartitionID, WorkerID: r.WorkerID, Error: "partition read failed"}
 }
 
@@ -183,7 +183,7 @@ func TestFailureReportsTerminateSetAndRetainSiblingReservations(t *testing.T) {
 		t.Fatalf("callbacks: successes=%d failures=%d", len(run.successes), len(run.failures))
 	}
 	got := <-run.failures
-	want := scheduler.TaskAttemptFailure{JobID: failure.JobID, StageID: failure.StageID, Attempt: failure.Attempt,
+	want := scheduler.TaskAttemptFailure{Kind: scheduler.FailureExecution, JobID: failure.JobID, StageID: failure.StageID, Attempt: failure.Attempt,
 		PartitionID: failure.PartitionID, WorkerID: failure.WorkerID, Error: failure.Error}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("failure = %#v, want %#v", got, want)

@@ -32,7 +32,7 @@ func TestWorkerPassesAssignedIdentityToRunnerAndReport(t *testing.T) {
 	a := protocol.TaskAssignment{
 		RunID: "0123456789abcdef0123456789abcdef", JobID: 7, StageID: 3, WorkerID: "worker-a",
 		Attempt: scheduler.TaskAttemptIdentity{ID: 19, TaskID: 11, StageAttemptID: 5},
-		Task: scheduler.Task{ID: 11, StageID: 3, PartitionID: 2,
+		Task: scheduler.Task{StageKind: scheduler.StageResult, ID: 11, StageID: 3, PartitionID: 2,
 			FinalAction: &scheduler.ActionSpec{Kind: scheduler.ActionCount}},
 	}
 	runner, client := &executionRecorder{}, &identityReportClient{}

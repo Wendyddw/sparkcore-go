@@ -26,7 +26,7 @@ func TestSchedulerEventsCarryJobAndTaskIdentity(t *testing.T) {
 	if success.JobID != 3 || success.Attempt.TaskID != 11 || success.StageID != 2 || success.PartitionID != 4 {
 		t.Fatalf("task success identity = %#v", success)
 	}
-	failure := taskFailed{TaskAttemptFailure{JobID: 3, StageID: 2, Attempt: success.Attempt, PartitionID: 4, Error: "task failed"}}
+	failure := taskFailed{TaskAttemptFailure{Kind: FailureExecution, JobID: 3, StageID: 2, Attempt: success.Attempt, PartitionID: 4, Error: "task failed"}}
 	if failure.Error != "task failed" || failure.Attempt != success.Attempt {
 		t.Fatalf("task failure = %#v", failure)
 	}

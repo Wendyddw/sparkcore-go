@@ -26,7 +26,7 @@ func (o *fifoObserver) TaskFailed(r TaskAttemptFailure)    { o.failures <- r }
 func fifoSet(job plan.JobID, partitions ...plan.PartitionID) TaskSet {
 	set := TaskSet{JobID: job, StageID: 0, StageAttemptID: plan.StageAttemptID(job)}
 	for _, partition := range partitions {
-		set.Tasks = append(set.Tasks, Task{ID: plan.TaskID(partition), PartitionID: partition, StageKind: StageResult, NumPartitions: len(partitions)})
+		set.Tasks = append(set.Tasks, Task{ID: plan.TaskID(partition), PartitionID: partition, StageKind: StageResult, FinalAction: &ActionSpec{Kind: ActionCount}, NumPartitions: len(partitions)})
 	}
 	return set
 }
@@ -179,7 +179,7 @@ func TestFIFOTwoWorkersChooseOldestPendingTaskSet(t *testing.T) {
 
 func failureFor(a TaskAssignment) TaskAttemptFailure {
 	r := fifoSuccess(a, 0)
-	return TaskAttemptFailure{JobID: r.JobID, StageID: r.StageID, Attempt: r.Attempt, PartitionID: r.PartitionID, WorkerID: r.WorkerID, Error: "broken partition"}
+	return TaskAttemptFailure{Kind: FailureExecution, JobID: r.JobID, StageID: r.StageID, Attempt: r.Attempt, PartitionID: r.PartitionID, WorkerID: r.WorkerID, Error: "broken partition"}
 }
 func assertReserved(t *testing.T, s *FIFOTaskScheduler, id plan.WorkerID, want int) {
 	t.Helper()
@@ -529,6 +529,7 @@ func TestFIFOValidatesSubmissionsAndCopiesMetadata(t *testing.T) {
 	}
 	set := fifoSet(1, 0)
 	set.Tasks[0].Operations = []StageOperation{{Kind: StageOperationRDD, RDD: &RDDOperationSpec{Operator: plan.OperatorSpec{Kind: plan.OpSource, SourcePath: "original"}}}}
+	set.Tasks[0].FinalAction.Kind = ActionCollect
 	observer, done := startFIFOSet(t, s, context.Background(), set)
 	if err := s.ScheduleTaskSet(context.Background(), set, newFIFOObserver()); err == nil {
 		t.Fatal("duplicate set accepted")
@@ -555,7 +556,7 @@ func TestFIFOValidatesSubmissionsAndCopiesMetadata(t *testing.T) {
 		t.Fatal("snapshot aliases registry")
 	}
 	records := []any{"original output"}
-	report := fifoSuccess(a, 7)
+	report := fifoSuccess(a, 0)
 	report.Output.Records = records
 	if err := s.ReportSuccess(report); err != nil {
 		t.Fatal(err)
@@ -571,7 +572,7 @@ func TestFIFOValidatesSubmissionsAndCopiesMetadata(t *testing.T) {
 		t.Fatal("duplicate result delivered")
 	}
 	result := <-observer.successes
-	if result.Output.Count != 7 || result.Output.Records[0] != "original output" {
+	if result.Output.Count != 0 || result.Output.Records[0] != "original output" {
 		t.Fatalf("result = %#v", result)
 	}
 	s.mu.Lock()

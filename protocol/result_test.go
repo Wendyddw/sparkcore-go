@@ -18,7 +18,7 @@ func TestResultMessagesPreserveV1JSONContract(t *testing.T) {
 		json  string
 	}{
 		{"task success", protocol.TaskSuccessRequest{JobID: 5, StageID: 2, Attempt: identity, PartitionID: 1, WorkerID: "worker-a", Output: protocol.TaskOutput{Count: 4}}, `{"job_id":5,"stage_id":2,"attempt":{"id":12,"task_id":8,"stage_attempt_id":3},"partition_id":1,"worker_id":"worker-a","output":{"records":null,"count":4}}`},
-		{"task failure", protocol.TaskFailureRequest{JobID: 5, StageID: 2, Attempt: identity, PartitionID: 1, WorkerID: "worker-a", Error: "unknown function: normalize"}, `{"job_id":5,"stage_id":2,"attempt":{"id":12,"task_id":8,"stage_attempt_id":3},"partition_id":1,"worker_id":"worker-a","error":"unknown function: normalize"}`},
+		{"task failure", protocol.TaskFailureRequest{Kind: scheduler.FailureExecution, JobID: 5, StageID: 2, Attempt: identity, PartitionID: 1, WorkerID: "worker-a", Error: "unknown function: normalize"}, `{"kind":"execution","job_id":5,"stage_id":2,"attempt":{"id":12,"task_id":8,"stage_attempt_id":3},"partition_id":1,"worker_id":"worker-a","error":"unknown function: normalize"}`},
 		{"acknowledgment", protocol.TaskReportResponse{Acknowledged: true}, `{"acknowledged":true}`},
 		{"zero count", protocol.JobResultResponse{Action: scheduler.ActionCount, Count: 0}, `{"action":"count","records":null,"count":0}`},
 		{"empty collect", protocol.JobResultResponse{Action: scheduler.ActionCollect, Records: []json.RawMessage{}}, `{"action":"collect","records":[],"count":0}`},

@@ -118,7 +118,7 @@ func TestTaskAttemptReportsCarrySchedulingIdentity(t *testing.T) {
 		WorkerID:    "worker-a",
 		Output:      TaskOutput{Count: 4},
 	}
-	failure := TaskAttemptFailure{
+	failure := TaskAttemptFailure{Kind: FailureExecution,
 		JobID:       5,
 		StageID:     2,
 		Attempt:     identity,

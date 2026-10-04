@@ -80,10 +80,10 @@ func TestDAGSchedulerIgnoresMismatchedReports(t *testing.T) {
 			mutate(&bad)
 			bad.Output.Count = 100
 			observer.TaskSucceeded(bad)
-			observer.TaskFailed(TaskAttemptFailure{JobID: bad.JobID, StageID: bad.StageID, Attempt: bad.Attempt, PartitionID: bad.PartitionID, Error: "obsolete failure"})
+			observer.TaskFailed(TaskAttemptFailure{Kind: FailureExecution, JobID: bad.JobID, StageID: bad.StageID, Attempt: bad.Attempt, PartitionID: bad.PartitionID, Error: "obsolete failure"})
 		}
 		observer.TaskSucceeded(valid)
-		observer.TaskFailed(TaskAttemptFailure{JobID: valid.JobID, StageID: valid.StageID, Attempt: valid.Attempt, PartitionID: valid.PartitionID, Error: "duplicate terminal report"})
+		observer.TaskFailed(TaskAttemptFailure{Kind: FailureExecution, JobID: valid.JobID, StageID: valid.StageID, Attempt: valid.Attempt, PartitionID: valid.PartitionID, Error: "duplicate terminal report"})
 		observer.TaskSucceeded(successFor(set, 1, TaskOutput{Count: 2}))
 		return nil
 	})
@@ -138,7 +138,7 @@ func TestDAGSchedulerCancellationAndFailureStopScheduling(t *testing.T) {
 				close(started)
 				if reason == "failure" {
 					r := successFor(set, 1, TaskOutput{})
-					observer.TaskFailed(TaskAttemptFailure{JobID: r.JobID, StageID: r.StageID, Attempt: r.Attempt, PartitionID: r.PartitionID, Error: "broken partition"})
+					observer.TaskFailed(TaskAttemptFailure{Kind: FailureExecution, JobID: r.JobID, StageID: r.StageID, Attempt: r.Attempt, PartitionID: r.PartitionID, Error: "broken partition"})
 				}
 				<-ctx.Done()
 				return ctx.Err()

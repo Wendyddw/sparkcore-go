@@ -52,7 +52,7 @@ func successRequest(a protocol.TaskAssignment) protocol.TaskSuccessRequest {
 }
 
 func failureRequest(a protocol.TaskAssignment) protocol.TaskFailureRequest {
-	return protocol.TaskFailureRequest{JobID: a.JobID, StageID: a.StageID, WorkerID: a.WorkerID,
+	return protocol.TaskFailureRequest{Kind: scheduler.FailureExecution, JobID: a.JobID, StageID: a.StageID, WorkerID: a.WorkerID,
 		Attempt: a.Attempt, PartitionID: a.Task.PartitionID, Error: "source read failed"}
 }
 
