@@ -12,7 +12,7 @@ func (h *handler) taskSuccess(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	output := scheduler.TaskOutput{Count: request.Output.Count}
+	output := (scheduler.TaskOutput{Count: request.Output.Count, ShuffleOutput: request.Output.ShuffleOutput}).Clone()
 	if request.Output.Records != nil {
 		output.Records = make([]any, len(request.Output.Records))
 		for i, record := range request.Output.Records {
@@ -37,6 +37,7 @@ func (h *handler) taskFailure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := h.tasks.ReportFailure(scheduler.TaskAttemptFailure{
+		Kind: request.Kind, ShuffleInput: request.ShuffleInput,
 		JobID: request.JobID, StageID: request.StageID, Attempt: request.Attempt,
 		PartitionID: request.PartitionID, WorkerID: request.WorkerID, Error: request.Error,
 	})

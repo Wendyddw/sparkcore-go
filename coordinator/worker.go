@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/Wendyddw/sparkcore-go/protocol"
+	"github.com/Wendyddw/sparkcore-go/shuffle"
 )
 
 func (h *handler) registerWorker(w http.ResponseWriter, r *http.Request) {
@@ -42,12 +43,13 @@ func (h *handler) heartbeat(w http.ResponseWriter, r *http.Request) {
 	response := protocol.HeartbeatResponse{Assignments: make([]protocol.TaskAssignment, 0, len(assignments))}
 	for _, assignment := range assignments {
 		response.Assignments = append(response.Assignments, protocol.TaskAssignment{
-			RunID:    assignment.RunID,
-			JobID:    assignment.JobID,
-			StageID:  assignment.StageID,
-			WorkerID: assignment.Attempt.WorkerID,
-			Attempt:  assignment.Attempt.Identity,
-			Task:     assignment.Attempt.Task,
+			ShuffleInputs: shuffle.CloneInput(assignment.ShuffleInputs),
+			RunID:         assignment.RunID,
+			JobID:         assignment.JobID,
+			StageID:       assignment.StageID,
+			WorkerID:      assignment.Attempt.WorkerID,
+			Attempt:       assignment.Attempt.Identity,
+			Task:          assignment.Attempt.Task,
 		})
 	}
 	writeJSON(w, http.StatusOK, response)
