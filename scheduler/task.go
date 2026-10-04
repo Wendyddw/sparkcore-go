@@ -25,7 +25,7 @@ type Task struct {
 }
 
 // TaskAttemptIdentity identifies one physical attempt of a logical task.
-// TaskAttempt carries assignment state; retry policy is deferred to Week 3.
+// TaskAttempt carries one physical assignment; FIFO owns its retry policy.
 type TaskAttemptIdentity struct {
 	ID             plan.TaskAttemptID  `json:"id"`
 	TaskID         plan.TaskID         `json:"task_id"`

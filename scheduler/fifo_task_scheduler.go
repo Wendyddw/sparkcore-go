@@ -38,10 +38,11 @@ type taskSetKey struct {
 	attempt plan.StageAttemptID
 }
 type logicalTaskState struct {
-	task   Task
-	state  TaskState
-	active plan.TaskAttemptID
-	output TaskOutput
+	task     Task
+	state    TaskState
+	active   plan.TaskAttemptID
+	output   TaskOutput
+	attempts int
 }
 type fifoTaskSet struct {
 	inputs    *shuffle.InputSnapshot
@@ -49,7 +50,6 @@ type fifoTaskSet struct {
 	sequence  uint64
 	ctx       context.Context
 	tasks     []*logicalTaskState
-	pending   int
 	remaining int
 	reports   []terminalReport
 	wake      chan struct{}
@@ -73,29 +73,32 @@ type assignedAttempt struct {
 // It never reads RDD lineage. Observer callbacks run in ScheduleTaskSet, outside
 // the mutex; worker-facing methods only update state and enqueue reports.
 type FIFOTaskScheduler struct {
-	runID        string
-	logger       *slog.Logger
-	mu           sync.Mutex
-	registry     WorkerRegistry
-	sets         map[taskSetKey]*fifoTaskSet
-	queue        []*fifoTaskSet
-	attempts     map[plan.TaskAttemptID]*assignedAttempt
-	nextSequence uint64
-	nextAttempt  plan.TaskAttemptID
-	closed       bool
-	submissions  sync.WaitGroup
+	maxTaskAttempts int
+	runID           string
+	logger          *slog.Logger
+	mu              sync.Mutex
+	registry        WorkerRegistry
+	sets            map[taskSetKey]*fifoTaskSet
+	queue           []*fifoTaskSet
+	attempts        map[plan.TaskAttemptID]*assignedAttempt
+	nextSequence    uint64
+	nextAttempt     plan.TaskAttemptID
+	closed          bool
+	submissions     sync.WaitGroup
 }
 
 var _ TaskSetScheduler = (*FIFOTaskScheduler)(nil)
 
 // NewFIFOTaskScheduler creates an empty scheduler with no workers or background loops.
 func NewFIFOTaskScheduler(options ...Option) *FIFOTaskScheduler {
+	config := resolveSchedulerOptions(options)
 	return &FIFOTaskScheduler{
-		runID:    NewRunID(),
-		logger:   schedulerLogger("fifo_scheduler", options),
-		registry: WorkerRegistry{workers: make(map[plan.WorkerID]*workerState)},
-		sets:     make(map[taskSetKey]*fifoTaskSet),
-		attempts: make(map[plan.TaskAttemptID]*assignedAttempt),
+		maxTaskAttempts: config.maxTaskAttempts,
+		runID:           NewRunID(),
+		logger:          config.loggerFor("fifo_scheduler"),
+		registry:        WorkerRegistry{workers: make(map[plan.WorkerID]*workerState)},
+		sets:            make(map[taskSetKey]*fifoTaskSet),
+		attempts:        make(map[plan.TaskAttemptID]*assignedAttempt),
 	}
 }
 
@@ -117,7 +120,7 @@ func (s *FIFOTaskScheduler) Worker(id plan.WorkerID) (WorkerSnapshot, error) {
 }
 
 // ScheduleTaskSet queues one stage attempt, delivers accepted reports, and waits
-// for completion or cancellation. Failed tasks are terminal; Week 2 never retries.
+// for completion or cancellation. Retryable failures stay internal until exhausted.
 func (s *FIFOTaskScheduler) ScheduleTaskSet(ctx context.Context, input TaskSet, observer TaskSetObserver) error {
 	if observer == nil {
 		return fmt.Errorf("task-set observer is nil")
@@ -256,12 +259,17 @@ func (s *FIFOTaskScheduler) OfferResources(id plan.WorkerID, free int, running [
 			s.finish(set, err)
 			continue
 		}
-		for available > 0 && set.pending < len(set.tasks) {
-			task := set.tasks[set.pending]
-			set.pending++
+		for _, task := range set.tasks {
+			if available <= 0 {
+				break
+			}
+			if task.state != TaskPending {
+				continue
+			}
 			identity := TaskAttemptIdentity{ID: s.nextAttempt, TaskID: task.task.ID, StageAttemptID: set.key.attempt}
 			s.nextAttempt++
 			task.state = TaskRunning
+			task.attempts++
 			task.active = identity.ID
 			assignment := TaskAssignment{RunID: s.runID, JobID: set.key.job, StageID: set.key.stage, Attempt: TaskAttempt{Identity: identity, Task: cloneTask(task.task), WorkerID: id, State: TaskRunning}}
 			assignment.ShuffleInputs = shuffle.CloneInput(set.inputs)
@@ -311,7 +319,7 @@ func (s *FIFOTaskScheduler) ReportSuccess(report TaskAttemptSuccess) error {
 	return nil
 }
 
-// ReportFailure releases this attempt and terminates its task set without retry.
+// ReportFailure retires the attempt and either requeues its task or fails the set.
 func (s *FIFOTaskScheduler) ReportFailure(report TaskAttemptFailure) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -339,6 +347,10 @@ func (s *FIFOTaskScheduler) ReportFailure(report TaskAttemptFailure) error {
 	}
 	if err := attempt.set.ctx.Err(); err != nil {
 		s.finish(attempt.set, err)
+		return nil
+	}
+	if report.Kind == FailureExecution && attempt.task.attempts < s.maxTaskAttempts {
+		attempt.task.state = TaskPending
 		return nil
 	}
 	attempt.set.reports = append(attempt.set.reports, terminalReport{failure: &report})
@@ -392,7 +404,8 @@ func (s *FIFOTaskScheduler) finish(set *fifoTaskSet, err error) {
 func (s *FIFOTaskScheduler) compactQueue() {
 	live := s.queue[:0]
 	for _, set := range s.queue {
-		if !set.terminal && set.pending < len(set.tasks) {
+		// Fully dispatched sets retain their admission position for later retries.
+		if !set.terminal {
 			live = append(live, set)
 		}
 	}

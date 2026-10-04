@@ -10,7 +10,28 @@ import (
 type Option func(*schedulerOptions)
 
 type schedulerOptions struct {
-	logger *slog.Logger
+	logger          *slog.Logger
+	maxTaskAttempts int
+}
+
+// DefaultMaxTaskAttempts includes the initial assignment and two retries.
+const DefaultMaxTaskAttempts = 3
+
+// WithMaxTaskAttempts sets FIFO's per-task assignment limit within a stage attempt.
+// One disables retries. It panics if max is not positive.
+func WithMaxTaskAttempts(max int) Option {
+	if max <= 0 {
+		panic("max task attempts must be positive")
+	}
+	return func(options *schedulerOptions) { options.maxTaskAttempts = max }
+}
+
+func resolveSchedulerOptions(options []Option) schedulerOptions {
+	config := schedulerOptions{maxTaskAttempts: DefaultMaxTaskAttempts}
+	for _, option := range options {
+		option(&config)
+	}
+	return config
 }
 
 // WithLogger enables structured lifecycle events. Nil disables logging.
@@ -19,10 +40,11 @@ func WithLogger(logger *slog.Logger) Option {
 }
 
 func schedulerLogger(component string, options []Option) *slog.Logger {
-	var config schedulerOptions
-	for _, option := range options {
-		option(&config)
-	}
+	config := resolveSchedulerOptions(options)
+	return config.loggerFor(component)
+}
+
+func (config schedulerOptions) loggerFor(component string) *slog.Logger {
 	if config.logger == nil {
 		config.logger = slog.New(slog.DiscardHandler)
 	}
