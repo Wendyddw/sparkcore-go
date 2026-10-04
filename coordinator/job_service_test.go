@@ -199,7 +199,7 @@ func TestJobServiceConcurrentJobsOwnTheirLineage(t *testing.T) {
 }
 
 func TestJobServiceRejectsPlansBeforeScheduling(t *testing.T) {
-	for _, name := range []string{"invalid spec", "unknown function", "shuffle"} {
+	for _, name := range []string{"invalid spec", "unknown function", "multiple shuffles"} {
 		t.Run(name, func(t *testing.T) {
 			jobs, tasks, h := newJobService(t)
 			register(t, h, "a", 4)
@@ -211,12 +211,13 @@ func TestJobServiceRejectsPlansBeforeScheduling(t *testing.T) {
 			case "unknown function":
 				spec.Transformations[0].FunctionID = "missing"
 				want = "missing"
-			case "shuffle":
+			case "multiple shuffles":
 				spec.Transformations = []jobspec.TransformationSpec{
 					{Kind: plan.OpMapToPair, FunctionID: "word_pair"},
 					{Kind: plan.OpReduceByKey, FunctionID: "sum_int", NumPartitions: 2},
+					{Kind: plan.OpReduceByKey, FunctionID: "sum_int", NumPartitions: 1},
 				}
-				want = "shuffle execution is not implemented"
+				want = "only narrow or single-shuffle execution is supported"
 			}
 			got := waitJob(t, startJob(t, jobs, context.Background(), spec))
 			if got.err == nil || !strings.Contains(got.err.Error(), want) {

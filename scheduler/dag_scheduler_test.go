@@ -36,7 +36,11 @@ func TestDAGSchedulerSubmitsTaskSetAndMergesEveryPartition(t *testing.T) {
 					return errors.New("expected four tasks")
 				}
 				for _, partition := range []int{2, 0, 1, 3} {
-					report := successFor(set, partition, TaskOutput{Count: int64(partition + 1), Records: []any{partition}})
+					output := TaskOutput{Count: int64(partition + 1)}
+					if action == ActionCollect {
+						output = TaskOutput{Records: []any{partition}}
+					}
+					report := successFor(set, partition, output)
 					observer.TaskSucceeded(report)
 					// Duplicate reports must not count as another logical partition.
 					observer.TaskSucceeded(report)
@@ -113,16 +117,17 @@ func TestDAGSchedulerSchedulingErrorsUnblockJob(t *testing.T) {
 	}
 }
 
-func TestDAGSchedulerRejectsShuffleExecutionBeforeDispatch(t *testing.T) {
+func TestDAGSchedulerRejectsMultipleShufflesBeforeDispatch(t *testing.T) {
 	graph := plan.NewRDDGraph()
 	source := addPlannerNode(t, graph, plannerSourceNode(4))
 	paired := addPlannerNode(t, graph, plannerNarrowNode("MapToPair", plan.OpMapToPair, "pair", source, 4))
-	target := addPlannerNode(t, graph, plannerShuffleNode("ReduceByKey", "sum", paired, plan.HashPartitioner(2), 3))
+	first := addPlannerNode(t, graph, plannerShuffleNode("ReduceByKey", "sum", paired, plan.HashPartitioner(2), 3))
+	target := addPlannerNode(t, graph, plannerShuffleNode("ReduceAgain", "sum", first, plan.HashPartitioner(1), 4))
 	called := false
 	dag := NewDAGScheduler(&recordingFunctionLookup{exists: true}, taskSetSchedulerFunc(func(context.Context, TaskSet, TaskSetObserver) error { called = true; return nil }))
 	_, err := dag.Run(context.Background(), graph, ActionSpec{Kind: ActionCollect, TargetRDD: target})
 	dag.Close()
-	if err == nil || !strings.Contains(err.Error(), "shuffle execution is not implemented") || called {
+	if err == nil || !strings.Contains(err.Error(), "only narrow or single-shuffle execution is supported") || called {
 		t.Fatalf("error = %v, dispatched = %v", err, called)
 	}
 }

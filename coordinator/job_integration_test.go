@@ -16,6 +16,7 @@ import (
 	"github.com/Wendyddw/sparkcore-go/coordinator"
 	"github.com/Wendyddw/sparkcore-go/executor"
 	"github.com/Wendyddw/sparkcore-go/internal/examplefuncs"
+	"github.com/Wendyddw/sparkcore-go/jobspec"
 	"github.com/Wendyddw/sparkcore-go/plan"
 	"github.com/Wendyddw/sparkcore-go/protocol"
 	"github.com/Wendyddw/sparkcore-go/scheduler"
@@ -170,7 +171,7 @@ func TestSubmitHTTPRejectsUnsupportedPlansBeforeAssignment(t *testing.T) {
 	jobs, tasks, _ := newJobService(t)
 	ts := liveJobServer(t, tasks, jobs, coordinator.Config{})
 	t.Cleanup(jobs.Close)
-	for _, name := range []string{"unknown function", "shuffle"} {
+	for _, name := range []string{"unknown function", "multiple shuffles"} {
 		spec := narrowJob(t, scheduler.ActionCount, 4)
 		if name == "unknown function" {
 			spec.Transformations[0].FunctionID = "missing"
@@ -180,6 +181,9 @@ func TestSubmitHTTPRejectsUnsupportedPlansBeforeAssignment(t *testing.T) {
 			spec.Transformations[1].Kind = plan.OpReduceByKey
 			spec.Transformations[1].FunctionID = "sum_int"
 			spec.Transformations[1].NumPartitions = 2
+			spec.Transformations = append(spec.Transformations, jobspec.TransformationSpec{
+				Kind: plan.OpReduceByKey, FunctionID: "sum_int", NumPartitions: 1,
+			})
 		}
 		got := httpJobResponse[protocol.ErrorResponse](t, startHTTPJob(t, ts, context.Background(), spec), 422)
 		if got.Code != protocol.CodeJobFailed {
