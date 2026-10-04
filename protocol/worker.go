@@ -8,6 +8,7 @@ package protocol
 import (
 	"github.com/Wendyddw/sparkcore-go/plan"
 	"github.com/Wendyddw/sparkcore-go/scheduler"
+	"github.com/Wendyddw/sparkcore-go/shuffle"
 )
 
 const (
@@ -49,16 +50,17 @@ type HeartbeatResponse struct {
 // The worker receives executable metadata, not scheduler-owned lifecycle state.
 // Attempt.TaskID and StageID must match Task.ID and Task.StageID respectively.
 type TaskAssignment struct {
-	RunID    string                        `json:"run_id"`
-	JobID    plan.JobID                    `json:"job_id"`
-	StageID  plan.StageID                  `json:"stage_id"`
-	WorkerID plan.WorkerID                 `json:"worker_id"`
-	Attempt  scheduler.TaskAttemptIdentity `json:"attempt"`
-	Task     scheduler.Task                `json:"task"`
+	ShuffleInputs *shuffle.InputSnapshot        `json:"shuffle_inputs,omitempty"`
+	RunID         string                        `json:"run_id"`
+	JobID         plan.JobID                    `json:"job_id"`
+	StageID       plan.StageID                  `json:"stage_id"`
+	WorkerID      plan.WorkerID                 `json:"worker_id"`
+	Attempt       scheduler.TaskAttemptIdentity `json:"attempt"`
+	Task          scheduler.Task                `json:"task"`
 }
 
 // Execution adapts assignment identity for the runner after protocol validation.
 func (a TaskAssignment) Execution() scheduler.TaskExecution {
 	return scheduler.TaskExecution{RunID: a.RunID, JobID: a.JobID, Task: a.Task,
-		Attempt: a.Attempt, WorkerID: a.WorkerID}
+		Attempt: a.Attempt, WorkerID: a.WorkerID, ShuffleInputs: shuffle.CloneInput(a.ShuffleInputs)}
 }

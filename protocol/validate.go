@@ -101,19 +101,53 @@ func (a TaskAssignment) Validate() error {
 	if task.NumPartitions <= 0 || task.PartitionID < 0 || int(task.PartitionID) >= task.NumPartitions {
 		return fmt.Errorf("partition_id must be within num_partitions")
 	}
-	if task.StageKind != scheduler.StageResult || task.ShuffleWrite != nil {
-		return fmt.Errorf("only narrow result-stage assignments are supported")
-	}
-	if task.FinalAction == nil || (task.FinalAction.Kind != scheduler.ActionCount && task.FinalAction.Kind != scheduler.ActionCollect) {
-		return fmt.Errorf("assignment requires a Count or Collect final action")
+	mapTask := task.StageKind == scheduler.StageShuffleMap
+	switch task.StageKind {
+	case scheduler.StageShuffleMap:
+		if task.FinalAction != nil || task.ShuffleWrite == nil || a.ShuffleInputs != nil {
+			return fmt.Errorf("map assignment requires shuffle write and no action or shuffle inputs")
+		}
+		w := task.ShuffleWrite
+		if w.Partitioner.Kind != plan.PartitionerHash || w.Partitioner.NumPartitions <= 0 || strings.TrimSpace(w.AggregatorID) == "" {
+			return fmt.Errorf("shuffle write requires hash partitioning and an aggregator")
+		}
+	case scheduler.StageResult:
+		if task.ShuffleWrite != nil || task.FinalAction == nil || (task.FinalAction.Kind != scheduler.ActionCount && task.FinalAction.Kind != scheduler.ActionCollect) {
+			return fmt.Errorf("result assignment requires Count or Collect and no shuffle write")
+		}
+	default:
+		return fmt.Errorf("unsupported stage kind %q", task.StageKind)
 	}
 	if len(task.Operations) == 0 {
-		return fmt.Errorf("assignment requires a source pipeline")
+		return fmt.Errorf("assignment requires a pipeline")
 	}
+	readsShuffle := task.Operations[0].Kind == scheduler.StageOperationShuffleRead
+	if readsShuffle {
+		op := task.Operations[0]
+		if mapTask || op.RDD != nil || op.ShuffleRead == nil || a.ShuffleInputs == nil {
+			return fmt.Errorf("invalid shuffle read assignment")
+		}
+		input, read := a.ShuffleInputs, op.ShuffleRead
+		if err := input.Validate(); err != nil {
+			return err
+		}
+		if input.RunID != a.RunID || input.JobID != a.JobID || input.ShuffleID != read.ShuffleID || read.Partitioner.Kind != plan.PartitionerHash || read.Partitioner.NumPartitions != input.NumReducePartitions || task.NumPartitions != input.NumReducePartitions {
+			return fmt.Errorf("shuffle inputs do not match assignment")
+		}
+		if len(task.Operations) < 2 || task.Operations[1].RDD == nil || task.Operations[1].RDD.Operator.Kind != plan.OpReduceByKey {
+			return fmt.Errorf("shuffle read requires ReduceByKey")
+		}
+	} else if a.ShuffleInputs != nil {
+		return fmt.Errorf("narrow pipeline must not contain shuffle inputs")
+	}
+
 	seen := make(map[plan.RDDID]bool, len(task.Operations))
 	for i, operation := range task.Operations {
+		if i == 0 && readsShuffle {
+			continue
+		}
 		if operation.Kind != scheduler.StageOperationRDD || operation.RDD == nil || operation.ShuffleRead != nil {
-			return fmt.Errorf("operation %d must be a narrow RDD operation", i)
+			return fmt.Errorf("operation %d must be an RDD operation", i)
 		}
 		rdd := operation.RDD
 		if seen[rdd.RDDID] {
@@ -128,7 +162,10 @@ func (a TaskAssignment) Validate() error {
 			continue
 		}
 		switch op.Kind {
-		case plan.OpMap, plan.OpFilter, plan.OpMapToPair, plan.OpMapValues:
+		case plan.OpMap, plan.OpFilter, plan.OpMapToPair, plan.OpMapValues, plan.OpReduceByKey:
+			if (op.Kind == plan.OpReduceByKey) != (readsShuffle && i == 1) {
+				return fmt.Errorf("ReduceByKey must immediately follow shuffle read")
+			}
 			if strings.TrimSpace(op.FunctionID) == "" || op.SourcePath != "" {
 				return fmt.Errorf("operation %d requires a function_id and no source_path", i)
 			}
@@ -136,16 +173,22 @@ func (a TaskAssignment) Validate() error {
 			return fmt.Errorf("unsupported narrow operator %q", op.Kind)
 		}
 	}
-	if task.FinalAction.TargetRDD != task.Operations[len(task.Operations)-1].RDD.RDDID {
+	if !mapTask && task.FinalAction.TargetRDD != task.Operations[len(task.Operations)-1].RDD.RDDID {
 		return fmt.Errorf("final action target does not match pipeline output RDD")
 	}
 	return nil
 }
 func (o TaskOutput) Validate() error {
+	if o.ShuffleOutput != nil {
+		if o.Records != nil || o.Count != 0 {
+			return fmt.Errorf("shuffle output must not contain action results")
+		}
+		return o.ShuffleOutput.Validate()
+	}
 	if o.Count < 0 {
 		return fmt.Errorf("count must not be negative")
 	}
-	if len(o.Records) > 0 && o.Count != 0 {
+	if o.Records != nil && o.Count != 0 {
 		return fmt.Errorf("output cannot contain both records and a nonzero count")
 	}
 	for i, record := range o.Records {
@@ -159,9 +202,24 @@ func (r TaskSuccessRequest) Validate() error {
 	if err := validateReport(r.WorkerID, r.PartitionID); err != nil {
 		return err
 	}
-	return r.Output.Validate()
+	if err := r.Output.Validate(); err != nil {
+		return err
+	}
+	if r.Output.ShuffleOutput != nil {
+		a := r.Output.ShuffleOutput.Attempt
+		if a.JobID != r.JobID || a.StageID != r.StageID || a.StageAttemptID != r.Attempt.StageAttemptID || a.TaskID != r.Attempt.TaskID || a.TaskAttemptID != r.Attempt.ID || a.MapPartitionID != r.PartitionID {
+			return fmt.Errorf("map output identity differs from report")
+		}
+	}
+	return nil
 }
 func (r TaskFailureRequest) Validate() error {
+	if err := scheduler.ValidateFailure(r.Kind, r.ShuffleInput); err != nil {
+		return err
+	}
+	if r.ShuffleInput != nil && (r.ShuffleInput.Attempt.JobID != r.JobID || r.ShuffleInput.PartitionID != r.PartitionID) {
+		return fmt.Errorf("shuffle failure input differs from report job or partition")
+	}
 	if err := validateReport(r.WorkerID, r.PartitionID); err != nil {
 		return err
 	}
