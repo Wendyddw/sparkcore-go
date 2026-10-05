@@ -135,10 +135,11 @@ func TestHeartbeatPreservesAssignmentPipelineAndReservations(t *testing.T) {
 	if got := offer(t, server.Handler, "a", 0, assignments[0].Attempt.ID, assignments[1].Attempt.ID); len(got) != 0 {
 		t.Fatal("full worker received assignments")
 	}
+	beforeB, _ := tasks.Worker("b")
 	w := request(server.Handler, "POST", protocol.HeartbeatPath,
 		fmt.Sprintf(`{"worker_id":"b","free_slots":0,"running_attempt_ids":[%d]}`, assignments[0].Attempt.ID))
 	checkError(t, w, http.StatusBadRequest, protocol.CodeInvalidRequest)
-	if worker, _ := tasks.Worker("b"); !worker.LastHeartbeat.IsZero() {
+	if worker, _ := tasks.Worker("b"); !reflect.DeepEqual(beforeB, worker) {
 		t.Fatal("foreign attempt changed worker heartbeat")
 	}
 	if got := offer(t, server.Handler, "b", 1); len(got) != 1 || got[0].Task.PartitionID != 2 {

@@ -141,13 +141,14 @@ func TestRequestLimitIncludesTrailingWhitespace(t *testing.T) {
 			if path == protocol.HeartbeatPath {
 				register(t, server.Handler, "a", 1)
 			}
+			before, _ := tasks.Worker("a")
 			w := request(server.Handler, http.MethodPost, path, body+" ")
 			checkError(t, w, http.StatusRequestEntityTooLarge, protocol.CodeRequestTooLarge)
 			if path == protocol.RegisterWorkerPath {
 				if _, err := tasks.Worker("a"); !errors.Is(err, scheduler.ErrUnknownWorker) {
 					t.Fatalf("oversized registration changed state: %v", err)
 				}
-			} else if worker, _ := tasks.Worker("a"); !worker.LastHeartbeat.IsZero() {
+			} else if worker, _ := tasks.Worker("a"); !reflect.DeepEqual(before, worker) {
 				t.Fatal("oversized heartbeat changed state")
 			}
 			w = request(server.Handler, http.MethodPost, path, body)
