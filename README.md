@@ -22,6 +22,8 @@ Results complete after all partitions succeed: `Count` sums partition counts, an
 
 Distributed FIFO scheduling retries execution failures up to three total attempts per task, preserving successful partitions and FIFO priority. Configure the limit with `scheduler.WithMaxTaskAttempts(n)`; one disables retries and nonpositive values panic. Known validation/data errors fail immediately; custom functions can mark these with `scheduler.PermanentFailure(err)`. Local execution remains fail-fast, and HTTP requests are not automatically retried.
 
+The coordinator checks worker liveness every second and marks workers lost after 10 seconds without a valid heartbeat, starting from registration. Unfinished assignments use the same retry budget; accepted shuffle outputs remain available in shared storage. Lost worker IDs cannot register or receive work again. Embedded coordinators must run and join `coordinator.WorkerMonitor`; its timeout and interval are configurable through `WorkerMonitorConfig`.
+
 ## Run
 
 Requires Go 1.26.5 or a compatible newer toolchain. Run commands from the repository root.
@@ -60,7 +62,8 @@ go run ./cmd/explain --job examples/reduce_by_key.json
 - The coordinator and workers must register matching function IDs and implementations; arbitrary Go closures are not serialized. The commands register the included example functions.
 - Records must be JSON-compatible, and keys are strings.
 - Configure shuffle storage through `executor.WithShuffleStore` or `worker.RuntimeConfig.ShuffleStore`. Command flags are pending. Keep published files until all processes using them stop.
-- Multiple shuffles, disk spilling, worker-loss recovery, and recovery from missing/corrupt shuffle input are not implemented.
+- Multiple shuffles, disk spilling, and recovery from missing/corrupt shuffle input are not implemented.
+- Heartbeat expiry is suspicion: an old worker may still execute. Attempt isolation and report fencing protect accepted results, but cannot undo external side effects. Restart a lost worker with a new ID.
 - Canceling a submission stops pending scheduling; already assigned tasks may finish and report. Workers continue polling until stopped.
 
 ## Development
@@ -73,3 +76,5 @@ go vet ./...
 ```
 
 The [narrow integration tests](integration/distributed_narrow_test.go) and [shuffle integration tests](integration/dag_shuffle_test.go) exercise HTTP submission through two workers, including stage readiness, Count/Collect results, worker capacity, duplicate reports, and cleanup.
+
+[Retry tests](integration/task_retry_test.go) cover bounded task failures; [worker-loss tests](integration/worker_loss_test.go) verify that a survivor finishes using accepted shuffle output from a lost worker.
