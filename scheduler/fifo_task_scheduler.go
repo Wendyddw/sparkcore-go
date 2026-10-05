@@ -73,6 +73,7 @@ type assignedAttempt struct {
 // It never reads RDD lineage. Observer callbacks run in ScheduleTaskSet, outside
 // the mutex; worker-facing methods only update state and enqueue reports.
 type FIFOTaskScheduler struct {
+	now             func() time.Time
 	maxTaskAttempts int
 	runID           string
 	logger          *slog.Logger
@@ -93,6 +94,7 @@ var _ TaskSetScheduler = (*FIFOTaskScheduler)(nil)
 func NewFIFOTaskScheduler(options ...Option) *FIFOTaskScheduler {
 	config := resolveSchedulerOptions(options)
 	return &FIFOTaskScheduler{
+		now:             config.now,
 		maxTaskAttempts: config.maxTaskAttempts,
 		runID:           NewRunID(),
 		logger:          config.loggerFor("fifo_scheduler"),
@@ -102,14 +104,15 @@ func NewFIFOTaskScheduler(options ...Option) *FIFOTaskScheduler {
 	}
 }
 
-// RegisterWorker is idempotent when the worker ID and configured capacity match.
+// RegisterWorker is idempotent for an alive worker with matching capacity.
+// A lost worker must restart with a new ID.
 func (s *FIFOTaskScheduler) RegisterWorker(id plan.WorkerID, slots int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return ErrTaskSchedulerClosed
 	}
-	return s.registry.register(id, slots)
+	return s.registry.register(id, slots, s.now())
 }
 
 // Worker returns a detached snapshot of heartbeat data and current reservations.
@@ -230,6 +233,9 @@ func (s *FIFOTaskScheduler) OfferResources(id plan.WorkerID, free int, running [
 	if worker == nil {
 		return nil, fmt.Errorf("%w %q", ErrUnknownWorker, id)
 	}
+	if worker.Status == WorkerLost {
+		return nil, fmt.Errorf("%w %q", ErrWorkerLost, id)
+	}
 	if free < 0 || free > worker.TotalSlots || len(running) > worker.TotalSlots-free {
 		return nil, fmt.Errorf("%w: invalid capacity for worker %q", ErrInvalidResourceOffer, id)
 	}
@@ -243,7 +249,7 @@ func (s *FIFOTaskScheduler) OfferResources(id plan.WorkerID, free int, running [
 	}
 	worker.ReportedFreeSlots = free
 	worker.RunningAttemptIDs = append([]plan.TaskAttemptID(nil), running...)
-	worker.LastHeartbeat = time.Now()
+	worker.LastHeartbeat = s.now()
 	available := free
 	for attemptID := range worker.reserved {
 		if !seen[attemptID] {
@@ -341,21 +347,26 @@ func (s *FIFOTaskScheduler) ReportFailure(report TaskAttemptFailure) error {
 		}
 		report.ShuffleInput = &ref
 	}
+	s.failAttempt(attempt, report)
+	return nil
+}
+
+// failAttempt is shared by worker reports and scheduler-observed loss, under mu.
+func (s *FIFOTaskScheduler) failAttempt(attempt *assignedAttempt, report TaskAttemptFailure) {
 	s.release(attempt, TaskFailed)
 	if attempt.set.terminal {
-		return nil
+		return
 	}
 	if err := attempt.set.ctx.Err(); err != nil {
 		s.finish(attempt.set, err)
-		return nil
+		return
 	}
-	if report.Kind == FailureExecution && attempt.task.attempts < s.maxTaskAttempts {
+	if (report.Kind == FailureExecution || report.Kind == FailureWorkerLost) && attempt.task.attempts < s.maxTaskAttempts {
 		attempt.task.state = TaskPending
-		return nil
+		return
 	}
 	attempt.set.reports = append(attempt.set.reports, terminalReport{failure: &report})
 	s.finish(attempt.set, fmt.Errorf("stage %d task %d partition %d: %s", report.StageID, report.Attempt.TaskID, report.PartitionID, report.Error))
-	return nil
 }
 
 // Unknown or mismatched identities are errors; known terminal/obsolete reports

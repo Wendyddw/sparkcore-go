@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/Wendyddw/sparkcore-go/plan"
 )
@@ -12,6 +13,16 @@ type Option func(*schedulerOptions)
 type schedulerOptions struct {
 	logger          *slog.Logger
 	maxTaskAttempts int
+	now             func() time.Time
+}
+
+// WithClock supplies FIFO's registration and heartbeat clock. It must be safe
+// for concurrent use. A nil clock panics.
+func WithClock(now func() time.Time) Option {
+	if now == nil {
+		panic("scheduler clock must not be nil")
+	}
+	return func(options *schedulerOptions) { options.now = now }
 }
 
 // DefaultMaxTaskAttempts includes the initial assignment and two retries.
@@ -27,7 +38,7 @@ func WithMaxTaskAttempts(max int) Option {
 }
 
 func resolveSchedulerOptions(options []Option) schedulerOptions {
-	config := schedulerOptions{maxTaskAttempts: DefaultMaxTaskAttempts}
+	config := schedulerOptions{maxTaskAttempts: DefaultMaxTaskAttempts, now: time.Now}
 	for _, option := range options {
 		option(&config)
 	}
