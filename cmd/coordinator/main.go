@@ -70,20 +70,42 @@ func run(ctx context.Context, args []string, diagnostics io.Writer) error {
 		return fmt.Errorf("listen: %w", err)
 	}
 	defer listener.Close()
+	monitor, err := coordinator.NewWorkerMonitor(tasks, coordinator.WorkerMonitorConfig{})
+	if err != nil {
+		return err
+	}
+	monitorCtx, cancelMonitor := context.WithCancel(ctx)
+	monitorDone := make(chan struct{})
+	var monitorErr error
+	go func() {
+		defer close(monitorDone)
+		monitorErr = monitor.Run(monitorCtx)
+	}()
+	stopMonitor := func() { cancelMonitor(); <-monitorDone }
+	defer stopMonitor()
 	logger.Info("coordinator_listening", "address", listener.Addr().String())
 
 	served := make(chan error, 1)
 	go func() { served <- server.Serve(listener) }()
 	select {
 	case err := <-served:
+		stopMonitor()
 		jobs.Close()
 		_ = server.Close()
 		return fmt.Errorf("serve coordinator: %w", err)
+	case <-monitorDone:
+		if monitorErr != nil {
+			jobs.Close()
+			_ = server.Close()
+			<-served
+			return monitorErr
+		}
 	case <-ctx.Done():
 	}
 
 	// Finish blocking submissions before draining HTTP and closing placement.
 	logger.Info("coordinator_stopping")
+	stopMonitor()
 	jobs.Close()
 	drainCtx, cancel := context.WithTimeout(context.Background(), *shutdownTimeout)
 	defer cancel()

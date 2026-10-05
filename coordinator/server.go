@@ -139,7 +139,7 @@ func writeSchedulerError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, scheduler.ErrUnknownWorker), errors.Is(err, scheduler.ErrUnknownAttempt):
 		writeError(w, http.StatusNotFound, protocol.CodeNotFound, err.Error())
-	case errors.Is(err, scheduler.ErrWorkerConflict), errors.Is(err, scheduler.ErrMismatchedReport):
+	case errors.Is(err, scheduler.ErrWorkerConflict), errors.Is(err, scheduler.ErrWorkerLost), errors.Is(err, scheduler.ErrMismatchedReport):
 		writeError(w, http.StatusConflict, protocol.CodeConflict, err.Error())
 	case errors.Is(err, scheduler.ErrInvalidWorker), errors.Is(err, scheduler.ErrInvalidResourceOffer), errors.Is(err, scheduler.ErrInvalidTaskReport):
 		writeError(w, http.StatusBadRequest, protocol.CodeInvalidRequest, err.Error())
