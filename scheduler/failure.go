@@ -30,6 +30,7 @@ const (
 	FailurePermanent    FailureKind = "permanent"
 	FailureShuffleInput FailureKind = "shuffle_input"
 	FailureCanceled     FailureKind = "canceled"
+	FailureWorkerLost   FailureKind = "worker_lost" // Scheduler-generated; never accepted from workers.
 )
 
 // ValidateFailure checks worker-reported categories and their required metadata.
