@@ -8,7 +8,7 @@ import (
 )
 
 func TestRunExplainsShuffleJobWithoutReadingSource(t *testing.T) {
-	jobPath := filepath.Join("..", "..", "examples", "reduce_by_key.json")
+	jobPath := filepath.Join("..", "..", "examples", "reduce_by_key_explain.json")
 	var output bytes.Buffer
 	if err := run([]string{"-job", jobPath}, &output); err != nil {
 		t.Fatalf("run() error = %v", err)

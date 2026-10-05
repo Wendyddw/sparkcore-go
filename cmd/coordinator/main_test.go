@@ -22,6 +22,10 @@ import (
 func TestRunRejectsInvalidConfiguration(t *testing.T) {
 	for _, args := range [][]string{
 		{"--listen", ""}, {"--job-timeout", "0"}, {"--shutdown-timeout", "-1s"},
+		{"--max-task-attempts", "0"}, {"--max-task-attempts", "-1"},
+		{"--max-stage-attempts", "0"}, {"--max-stage-attempts", "-1"},
+		{"--worker-timeout", "0"}, {"--worker-check-interval", "-1s"},
+		{"--worker-timeout", "1s", "--worker-check-interval", "2s"},
 		{"--job-timeout", "bad"}, {"--unknown"}, {"unexpected"},
 	} {
 		if err := run(context.Background(), args, io.Discard); err == nil {

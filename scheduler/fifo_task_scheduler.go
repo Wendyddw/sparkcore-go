@@ -57,8 +57,11 @@ type fifoTaskSet struct {
 	err       error
 }
 type terminalReport struct {
-	success *TaskAttemptSuccess
-	failure *TaskAttemptFailure
+	success   *TaskAttemptSuccess
+	failure   *TaskAttemptFailure
+	requeued  bool
+	exhausted bool
+	attempts  int
 }
 type assignedAttempt struct {
 	assignment TaskAssignment
@@ -168,7 +171,13 @@ func (s *FIFOTaskScheduler) ScheduleTaskSet(ctx context.Context, input TaskSet, 
 				observer.TaskSucceeded(*report.success)
 			} else {
 				r := report.failure
-				s.logger.Error("task_failed", append(attemptLogFields(r.JobID, r.StageID, r.Attempt, r.PartitionID, r.WorkerID), "error", r.Error)...)
+				fields := append(attemptLogFields(r.JobID, r.StageID, r.Attempt, r.PartitionID, r.WorkerID), "failure_kind", r.Kind, "error", r.Error, "attempts", report.attempts, "max_task_attempts", s.maxTaskAttempts)
+				s.logger.Warn("task_attempt_failed", fields...)
+				if report.requeued {
+					s.logger.Info("task_requeued", fields...)
+					continue
+				}
+				s.logger.Error("task_failed", append(fields, "budget_exhausted", report.exhausted)...)
 				observer.TaskFailed(*report.failure)
 			}
 		}
@@ -361,11 +370,15 @@ func (s *FIFOTaskScheduler) failAttempt(attempt *assignedAttempt, report TaskAtt
 		s.finish(attempt.set, err)
 		return
 	}
-	if (report.Kind == FailureExecution || report.Kind == FailureWorkerLost) && attempt.task.attempts < s.maxTaskAttempts {
+	retryable := report.Kind == FailureExecution || report.Kind == FailureWorkerLost
+	requeued := retryable && attempt.task.attempts < s.maxTaskAttempts
+	attempt.set.reports = append(attempt.set.reports, terminalReport{failure: &report, requeued: requeued,
+		exhausted: retryable && !requeued, attempts: attempt.task.attempts})
+	if requeued {
 		attempt.task.state = TaskPending
+		s.notify(attempt.set)
 		return
 	}
-	attempt.set.reports = append(attempt.set.reports, terminalReport{failure: &report})
 	s.finish(attempt.set, fmt.Errorf("stage %d task %d partition %d: %s", report.StageID, report.Attempt.TaskID, report.PartitionID, report.Error))
 }
 

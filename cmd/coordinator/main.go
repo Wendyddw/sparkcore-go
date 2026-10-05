@@ -32,6 +32,10 @@ func main() {
 func run(ctx context.Context, args []string, diagnostics io.Writer) error {
 	flags := flag.NewFlagSet("coordinator", flag.ContinueOnError)
 	flags.SetOutput(diagnostics)
+	maxTaskAttempts := flags.Int("max-task-attempts", scheduler.DefaultMaxTaskAttempts, "total assignments per task per stage attempt, including the initial assignment; 1 disables task retries")
+	maxStageAttempts := flags.Int("max-stage-attempts", scheduler.DefaultMaxStageAttempts, "total executions per stage including the initial execution; 1 disables shuffle recovery")
+	workerTimeout := flags.Duration("worker-timeout", 10*time.Second, "silence since registration or last valid heartbeat before worker loss")
+	workerCheckInterval := flags.Duration("worker-check-interval", time.Second, "worker expiry check interval; must not exceed worker-timeout")
 	addr := flags.String("listen", "127.0.0.1:8080", "HTTP listen address")
 	jobTimeout := flags.Duration("job-timeout", 5*time.Minute, "maximum job execution time")
 	shutdownTimeout := flags.Duration("shutdown-timeout", 10*time.Second, "maximum HTTP shutdown drain time")
@@ -44,6 +48,12 @@ func run(ctx context.Context, args []string, diagnostics io.Writer) error {
 	if *addr == "" || *jobTimeout <= 0 || *shutdownTimeout <= 0 {
 		return fmt.Errorf("listen address must not be empty and timeouts must be positive")
 	}
+	if *maxTaskAttempts <= 0 || *maxStageAttempts <= 0 {
+		return fmt.Errorf("task and stage attempt limits must be positive")
+	}
+	if *workerTimeout <= 0 || *workerCheckInterval <= 0 || *workerCheckInterval > *workerTimeout {
+		return fmt.Errorf("worker timeout and check interval must be positive; check interval must not exceed timeout")
+	}
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -54,9 +64,9 @@ func run(ctx context.Context, args []string, diagnostics io.Writer) error {
 	if err := examplefuncs.Register(registry); err != nil {
 		return err
 	}
-	tasks := scheduler.NewFIFOTaskScheduler(scheduler.WithLogger(logger))
+	tasks := scheduler.NewFIFOTaskScheduler(scheduler.WithLogger(logger), scheduler.WithMaxTaskAttempts(*maxTaskAttempts))
 	defer tasks.Close()
-	jobs, err := coordinator.NewJobService(registry, tasks, scheduler.WithLogger(logger))
+	jobs, err := coordinator.NewJobService(registry, tasks, scheduler.WithLogger(logger), scheduler.WithMaxStageAttempts(*maxStageAttempts))
 	if err != nil {
 		return err
 	}
@@ -70,7 +80,7 @@ func run(ctx context.Context, args []string, diagnostics io.Writer) error {
 		return fmt.Errorf("listen: %w", err)
 	}
 	defer listener.Close()
-	monitor, err := coordinator.NewWorkerMonitor(tasks, coordinator.WorkerMonitorConfig{})
+	monitor, err := coordinator.NewWorkerMonitor(tasks, coordinator.WorkerMonitorConfig{WorkerTimeout: *workerTimeout, CheckInterval: *workerCheckInterval})
 	if err != nil {
 		return err
 	}
@@ -83,7 +93,7 @@ func run(ctx context.Context, args []string, diagnostics io.Writer) error {
 	}()
 	stopMonitor := func() { cancelMonitor(); <-monitorDone }
 	defer stopMonitor()
-	logger.Info("coordinator_listening", "address", listener.Addr().String())
+	logger.Info("coordinator_listening", "address", listener.Addr().String(), "max_task_attempts", *maxTaskAttempts, "max_stage_attempts", *maxStageAttempts, "worker_timeout", workerTimeout.String(), "worker_check_interval", workerCheckInterval.String())
 
 	served := make(chan error, 1)
 	go func() { served <- server.Serve(listener) }()

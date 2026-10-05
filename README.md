@@ -1,6 +1,6 @@
 # SparkCore Go
 
-A Spark-style execution core in Go for exploring lazy computation graphs, stage planning, and distributed task scheduling. It supports narrow pipelines and one-shuffle `ReduceByKey` jobs with `Count` and `Collect` actions. Shuffle execution requires a configured shared filesystem store; the commands currently demonstrate narrow jobs.
+A Spark-style execution core in Go for exploring lazy computation graphs, stage planning, and distributed task scheduling. It supports narrow pipelines and one-shuffle `ReduceByKey` jobs with `Count` and `Collect` actions. Shuffle execution uses a shared filesystem directory configured on executors.
 
 ## Architecture
 
@@ -50,7 +50,25 @@ Submit a job from another terminal:
 go run ./cmd/submit --coordinator http://127.0.0.1:8080 --job examples/count.json
 ```
 
-Both examples print `5`. Collect jobs print a JSON array. Results go to stdout; daemon lifecycle logs and command errors go to stderr. Use `--help` for flags and Ctrl-C to stop processes. Stop workers before the coordinator to allow their final reports to be acknowledged.
+Both examples print `5`. Collect jobs print a JSON array. Results go to stdout; lifecycle logs and command errors go to stderr. Use `--help` for flags and Ctrl-C to stop processes. Stop workers before the coordinator to allow their final reports to be acknowledged.
+
+Run the shuffle example locally:
+
+```bash
+go run ./cmd/local --job examples/reduce_by_key.json --shuffle-root /tmp/sparkcore-demo-shuffle
+```
+
+For distributed shuffle, add `--shuffle-root /tmp/sparkcore-demo-shuffle` to **both worker commands**, then submit `examples/reduce_by_key.json`. Every worker must use the same absolute directory on shared storage. The coordinator needs no storage flag: it sends metadata and a fresh run namespace with assignments. The example uses four map partitions and two reduce partitions and collects `alpha=2`, `beta=2`, `gamma=1`; changing its action to `count` returns `3`.
+
+The coordinator exposes `--max-task-attempts` (default 3), `--max-stage-attempts` (2), `--worker-timeout` (10s), and `--worker-check-interval` (1s). Attempt limits include the initial execution; 1 disables the corresponding retry/recovery. All values must be positive, and the check interval must not exceed the timeout. Local mode exposes the stage limit only. Keep worker heartbeat intervals comfortably below the timeout.
+
+Structured logs include `task_attempt_failed`, `task_requeued`, `task_failed` with `budget_exhausted`, `worker_lost`, `shuffle_output_accepted`, and `shuffle_recovery_started`. Attempt identities connect assignments, failures and accepted outputs.
+
+Published files are retained across job completion and process restarts. After stopping every process using this demo directory, remove it explicitly:
+
+```bash
+rm -rf /tmp/sparkcore-demo-shuffle
+```
 
 Inspect a shuffle plan without executing it:
 
@@ -58,12 +76,14 @@ Inspect a shuffle plan without executing it:
 go run ./cmd/explain --job examples/reduce_by_key.json
 ```
 
+`examples/reduce_by_key_explain.json` intentionally references a missing source to verify that explanation does not read input.
+
 ## Constraints
 
 - Workers must have access to source files. Relative paths resolve from each worker's working directory.
 - The coordinator and workers must register matching function IDs and implementations; arbitrary Go closures are not serialized. The commands register the included example functions.
 - Records must be JSON-compatible, and keys are strings.
-- Configure shuffle storage through `executor.WithShuffleStore` or `worker.RuntimeConfig.ShuffleStore`. Command flags are pending. Keep published files until all processes using them stop.
+- `--shuffle-root` is optional for narrow jobs and required for shuffle execution. Embedded callers configure `executor.WithShuffleStore` or `worker.RuntimeConfig.ShuffleStore`. Store handles close after execution stops; files remain until explicit cleanup.
 - Multiple shuffles and disk spilling are not implemented.
 - Heartbeat expiry is suspicion: an old worker may still execute. Attempt isolation and report fencing protect accepted results, but cannot undo external side effects. Restart a lost worker with a new ID.
 - Canceling a submission stops pending scheduling; already assigned tasks may finish and report. Workers continue polling until stopped.

@@ -269,6 +269,8 @@ func (s *DAGScheduler) handleTaskSucceeded(report TaskAttemptSuccess) {
 	}
 	if stage.stage.Kind == StageShuffleMap {
 		job.runID = runID
+		s.logger.Info("shuffle_output_accepted", append(attemptLogFields(report.JobID, report.StageID, report.Attempt, report.PartitionID, report.WorkerID),
+			"run_id", runID, "shuffle_id", report.Output.ShuffleOutput.Attempt.ShuffleID)...)
 	}
 	stage.outputs[report.PartitionID] = report.Output.Clone()
 	stage.remaining--

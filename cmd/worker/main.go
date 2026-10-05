@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wendyddw/sparkcore-go/internal/examplefuncs"
 	"github.com/Wendyddw/sparkcore-go/plan"
+	"github.com/Wendyddw/sparkcore-go/shuffle"
 	"github.com/Wendyddw/sparkcore-go/worker"
 )
 
@@ -26,10 +27,11 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, args []string, diagnostics io.Writer) error {
+func run(ctx context.Context, args []string, diagnostics io.Writer) (runErr error) {
 	flags := flag.NewFlagSet("worker", flag.ContinueOnError)
 	flags.SetOutput(diagnostics)
 	coordinatorURL := flags.String("coordinator", "http://127.0.0.1:8080", "coordinator HTTP origin")
+	shuffleRoot := flags.String("shuffle-root", "", "absolute shuffle directory shared by all workers (empty disables shuffle storage)")
 	id := flags.String("id", "", "unique worker ID (required)")
 	slots := flags.Int("slots", 2, "maximum concurrent task attempts")
 	heartbeatInterval := flags.Duration("heartbeat-interval", 100*time.Millisecond, "interval between completed heartbeats")
@@ -47,16 +49,25 @@ func run(ctx context.Context, args []string, diagnostics io.Writer) error {
 	if err != nil {
 		return err
 	}
+	var store shuffle.Store
+	if *shuffleRoot != "" {
+		filesystem, err := shuffle.NewFilesystem(*shuffleRoot)
+		if err != nil {
+			return fmt.Errorf("open shuffle store: %w", err)
+		}
+		defer func() { runErr = errors.Join(runErr, filesystem.Close()) }()
+		store = filesystem
+	}
 	// Each worker owns its function registry and partition executor.
 	logger := slog.New(slog.NewJSONHandler(diagnostics, nil))
 	runtime, err := worker.NewRuntime(client, worker.RuntimeConfig{
 		WorkerID: plan.WorkerID(*id), Slots: *slots, HeartbeatInterval: *heartbeatInterval,
-		RequestTimeout: *requestTimeout, RegisterFunctions: examplefuncs.Register, Logger: logger,
+		RequestTimeout: *requestTimeout, RegisterFunctions: examplefuncs.Register, Logger: logger, ShuffleStore: store,
 	})
 	if err != nil {
 		return err
 	}
-	logger.Info("worker_starting", "worker_id", *id, "slots", *slots, "coordinator", *coordinatorURL)
+	logger.Info("worker_starting", "worker_id", *id, "slots", *slots, "coordinator", *coordinatorURL, "shuffle_root", *shuffleRoot)
 	err = runtime.Run(ctx)
 	if err != nil && !(ctx.Err() != nil && errors.Is(err, ctx.Err())) {
 		return fmt.Errorf("run worker %q: %w", *id, err)

@@ -1,6 +1,6 @@
 {
   "source": {
-    "path": "examples/input.txt",
+    "path": "examples/missing-input.txt",
     "num_partitions": 4
   },
   "transformations": [

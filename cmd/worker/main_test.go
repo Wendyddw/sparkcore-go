@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +28,7 @@ func TestRunRejectsInvalidConfiguration(t *testing.T) {
 	for _, args := range [][]string{
 		nil, {"--id", "a", "--slots", "0"}, {"--id", "a", "--slots", "-1"},
 		{"--id", "a", "--heartbeat-interval", "0"}, {"--id", "a", "--request-timeout", "-1s"},
+		{"--id", "a", "--shuffle-root", "relative"},
 		{"--id", "a", "--coordinator", "invalid"}, {"--unknown"}, {"--id", "a", "extra"},
 	} {
 		if err := run(context.Background(), args, io.Discard); err == nil {
@@ -42,7 +45,7 @@ func TestWorkerProcess(t *testing.T) {
 	if os.Getenv("SPARKCORE_WORKER_TEST_PROCESS") != "1" {
 		return
 	}
-	os.Args = []string{"worker", "--coordinator", os.Getenv("SPARKCORE_WORKER_TEST_URL"), "--id", "process-worker", "--slots", "2", "--heartbeat-interval", "1ms", "--request-timeout", "1s"}
+	os.Args = []string{"worker", "--coordinator", os.Getenv("SPARKCORE_WORKER_TEST_URL"), "--id", "process-worker", "--slots", "2", "--heartbeat-interval", "1ms", "--request-timeout", "1s", "--shuffle-root", os.Getenv("SPARKCORE_WORKER_TEST_ROOT")}
 	main()
 	os.Exit(0)
 }
@@ -68,7 +71,7 @@ func TestWorkerProcessExecutesAndStopsOnSignal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWorkerProcess$")
-	cmd.Env = append(os.Environ(), "SPARKCORE_WORKER_TEST_PROCESS=1", "SPARKCORE_WORKER_TEST_URL="+ts.URL)
+	cmd.Env = append(os.Environ(), "SPARKCORE_WORKER_TEST_PROCESS=1", "SPARKCORE_WORKER_TEST_URL="+ts.URL, "SPARKCORE_WORKER_TEST_ROOT="+t.TempDir())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Start(); err != nil {
@@ -93,6 +96,22 @@ func TestWorkerProcessExecutesAndStopsOnSignal(t *testing.T) {
 	})
 	if err != nil || result.Count != 5 {
 		t.Fatalf("distributed result = %+v, %v", result, err)
+	}
+	shuffleResult, err := jobs.Submit(ctx, jobspec.Spec{
+		Source: jobspec.SourceSpec{Path: path, NumPartitions: 4},
+		Transformations: []jobspec.TransformationSpec{
+			{Kind: "map", FunctionID: "normalize"}, {Kind: "filter", FunctionID: "non_empty"},
+			{Kind: "map_to_pair", FunctionID: "word_pair"}, {Kind: "reduce_by_key", FunctionID: "sum_int", NumPartitions: 2},
+		}, Action: scheduler.ActionCollect,
+	})
+	var records []string
+	for _, record := range shuffleResult.Records {
+		records = append(records, string(record))
+	}
+	sort.Strings(records)
+	want := []string{`{"key":"alpha","value":2}`, `{"key":"beta","value":2}`, `{"key":"gamma","value":1}`}
+	if err != nil || !reflect.DeepEqual(records, want) {
+		t.Fatalf("shuffle = %v, %v", records, err)
 	}
 	snapshot, err := tasks.Worker("process-worker")
 	if err != nil || snapshot.TotalSlots != 2 || snapshot.ReservedSlots != 0 {
