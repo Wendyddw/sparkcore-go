@@ -100,3 +100,11 @@ go vet ./...
 The [narrow integration tests](integration/distributed_narrow_test.go) and [shuffle integration tests](integration/dag_shuffle_test.go) exercise HTTP submission through two workers, including stage readiness, Count/Collect results, worker capacity, duplicate reports, and cleanup.
 
 [Retry tests](integration/task_retry_test.go) cover bounded task failures; [worker-loss tests](integration/worker_loss_test.go) verify that a survivor finishes using accepted shuffle output from a lost worker. [Stage-recovery tests](integration/stage_recovery_test.go) damage published buckets and verify local/HTTP recovery and its attempt limit.
+
+The [process test](integration/process_shuffle_test.go) builds race-enabled coordinator and worker binaries, runs two workers with shared storage, and verifies Collect, Count and empty input. It also kills a worker after publication but before its success report reaches the coordinator, then verifies expiry and completion by the survivor. All fault injection stays in the test; processes stop before shuffle directories are removed.
+
+Run that check independently:
+
+```bash
+go test -race ./integration -run TestCommandProcessesShuffleAndWorkerLoss -count=1 -v
+```
