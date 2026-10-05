@@ -20,6 +20,8 @@ type stageState struct {
 	stage     Stage
 	attemptID plan.StageAttemptID
 	status    stageExecutionStatus
+	attempts  int
+	cancel    context.CancelFunc
 	tasks     []Task
 	remaining int
 	outputs   map[plan.PartitionID]TaskOutput
@@ -75,6 +77,9 @@ func (s *DAGScheduler) startReadyStages(jobID plan.JobID, job *jobState) error {
 		if !ready {
 			continue
 		}
+		if stage.attempts >= s.maxStageAttempts {
+			return fmt.Errorf("stage %d exhausted its %d stage attempts", id, s.maxStageAttempts)
+		}
 		set := TaskSet{JobID: jobID, StageID: id, StageAttemptID: s.nextStageAttemptID}
 		if len(stage.stage.ParentIDs) != 0 {
 			parent := job.stages[stage.stage.ParentIDs[0]]
@@ -94,10 +99,13 @@ func (s *DAGScheduler) startReadyStages(jobID plan.JobID, job *jobState) error {
 		}
 		s.nextStageAttemptID++
 		stage.attemptID, stage.status = set.StageAttemptID, stageRunning
+		stage.attempts++
+		stageCtx, cancel := context.WithCancel(job.ctx)
+		stage.cancel = cancel
 		s.logger.Info("stage_started", "job_id", jobID, "stage_id", id, "stage_attempt_id", stage.attemptID,
 			"partition_count", len(stage.tasks), "action", job.action.Kind)
 		s.workers.Add(1)
-		go s.scheduleTaskSet(job.ctx, set)
+		go s.scheduleTaskSet(stageCtx, set)
 	}
 	return nil
 }

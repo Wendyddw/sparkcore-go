@@ -22,6 +22,7 @@ type JobResult struct {
 
 // DAGScheduler coordinates action jobs through one state-owning event loop.
 type DAGScheduler struct {
+	maxStageAttempts   int
 	logger             *slog.Logger
 	planner            *Planner
 	taskScheduler      TaskSetScheduler
@@ -37,11 +38,13 @@ type DAGScheduler struct {
 
 // NewDAGScheduler creates and starts an in-process DAG scheduler.
 func NewDAGScheduler(functions FunctionLookup, taskScheduler TaskSetScheduler, options ...Option) *DAGScheduler {
+	config := resolveSchedulerOptions(options)
 	scheduler := &DAGScheduler{
-		logger:        schedulerLogger("dag_scheduler", options),
-		planner:       NewPlanner(functions),
-		taskScheduler: taskScheduler,
-		jobs:          make(map[plan.JobID]*jobState),
+		maxStageAttempts: config.maxStageAttempts,
+		logger:           config.loggerFor("dag_scheduler"),
+		planner:          NewPlanner(functions),
+		taskScheduler:    taskScheduler,
+		jobs:             make(map[plan.JobID]*jobState),
 	}
 	scheduler.loop = newEventLoop(scheduler.handleEvent)
 	return scheduler
@@ -101,14 +104,7 @@ func (s *DAGScheduler) handleEvent(event schedulerEvent) {
 	case taskSucceeded:
 		s.handleTaskSucceeded(event.TaskAttemptSuccess)
 	case taskFailed:
-		report := event.TaskAttemptFailure
-		if job := s.pendingTask(report.JobID, report.StageID, report.Attempt, report.PartitionID); job != nil {
-			err := fmt.Errorf("stage %d task %d partition %d: %s", report.StageID, report.Attempt.TaskID, report.PartitionID, report.Error)
-			if job.ctx.Err() != nil {
-				err = job.ctx.Err()
-			}
-			s.failJob(report.JobID, err)
-		}
+		s.handleTaskFailed(event.TaskAttemptFailure)
 	case taskSetFinished:
 		job := s.jobs[event.jobID]
 		if job == nil {

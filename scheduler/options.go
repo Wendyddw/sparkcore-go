@@ -11,9 +11,10 @@ import (
 type Option func(*schedulerOptions)
 
 type schedulerOptions struct {
-	logger          *slog.Logger
-	maxTaskAttempts int
-	now             func() time.Time
+	logger           *slog.Logger
+	maxTaskAttempts  int
+	maxStageAttempts int
+	now              func() time.Time
 }
 
 // WithClock supplies FIFO's registration and heartbeat clock. It must be safe
@@ -28,6 +29,18 @@ func WithClock(now func() time.Time) Option {
 // DefaultMaxTaskAttempts includes the initial assignment and two retries.
 const DefaultMaxTaskAttempts = 3
 
+// DefaultMaxStageAttempts allows the initial stage execution and one restart.
+const DefaultMaxStageAttempts = 2
+
+// WithMaxStageAttempts sets DAG's total executions per logical stage.
+// One disables shuffle recovery. It panics if max is not positive.
+func WithMaxStageAttempts(max int) Option {
+	if max <= 0 {
+		panic("max stage attempts must be positive")
+	}
+	return func(options *schedulerOptions) { options.maxStageAttempts = max }
+}
+
 // WithMaxTaskAttempts sets FIFO's per-task assignment limit within a stage attempt.
 // One disables retries. It panics if max is not positive.
 func WithMaxTaskAttempts(max int) Option {
@@ -38,7 +51,7 @@ func WithMaxTaskAttempts(max int) Option {
 }
 
 func resolveSchedulerOptions(options []Option) schedulerOptions {
-	config := schedulerOptions{maxTaskAttempts: DefaultMaxTaskAttempts, now: time.Now}
+	config := schedulerOptions{maxTaskAttempts: DefaultMaxTaskAttempts, maxStageAttempts: DefaultMaxStageAttempts, now: time.Now}
 	for _, option := range options {
 		option(&config)
 	}
@@ -48,11 +61,6 @@ func resolveSchedulerOptions(options []Option) schedulerOptions {
 // WithLogger enables structured lifecycle events. Nil disables logging.
 func WithLogger(logger *slog.Logger) Option {
 	return func(options *schedulerOptions) { options.logger = logger }
-}
-
-func schedulerLogger(component string, options []Option) *slog.Logger {
-	config := resolveSchedulerOptions(options)
-	return config.loggerFor(component)
 }
 
 func (config schedulerOptions) loggerFor(component string) *slog.Logger {
